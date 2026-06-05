@@ -52,9 +52,45 @@ pytest                           # 跑全部測試
 python tests/make_fixtures.py    # 需要時重新產生測試資料
 ```
 
-## 檔案
+## 檔案地圖
 
-- `app.py` — 主程式（Streamlit）
-- `forRTFdata.py` — 獨立的 RTF/XML 解析 CLI（參考用）
-- `requirements.txt` / `requirements-dev.txt` — 執行 / 測試相依套件
-- `tests/` — pytest 測試 + 合成 fixture（`tests/make_fixtures.py` 可重新產生）
+### 核心程式
+| 檔案 | 功能與作用 |
+|------|-----------|
+| `app.py` | **主程式**（Streamlit）。RTF/XML 解析、模板批次動作、撰寫頁定點逆寫、創造新檔，全部在這一支。檔頭有「核心不變量」說明，動程式碼前必讀。 |
+| `forRTFdata.py` | 獨立的**命令列** RTF/XML 解析器（`python forRTFdata.py file.xml`）。早期原型，現作參考／除錯用，app 不會匯入它。 |
+
+### 樣式
+| 檔案 | 功能與作用 |
+|------|-----------|
+| `make_styles.py` | 從一個參考 `.pro6` 抽出每張投影片的**排版樣式** → 寫出 `styles.json`（清空文字，只留字體／字級／顏色／位置／陰影等，**不含版權內容**）。 |
+| `styles.json` | 預先產生的樣式清單（單句中文／英文／中英／英中、大字中英／英中）。app 的「樣式」功能讀它套排版。 |
+
+### 執行與設定
+| 檔案 | 功能與作用 |
+|------|-----------|
+| `requirements.txt` | 執行 app 需要的套件：streamlit／opencc／pypinyin。 |
+| `requirements-dev.txt` | 開發／測試額外需要的：pytest。 |
+| `pytest.ini` | pytest 設定。 |
+| `.streamlit/config.toml` | Streamlit 主題（淺藍強調色、明暗可切換）與精簡的 ⋮ 工具選單。 |
+| `.devcontainer/devcontainer.json` | GitHub Codespaces／VS Code 開發容器設定（Python 3.11、自動裝相依）。 |
+| `.gitignore` | git 忽略清單（`.venv`、快取等不進版控）。 |
+| `hard-hat.png` | 分頁圖示（工程帽 favicon）。 |
+
+### 測試（`tests/`）
+| 檔案 | 功能與作用 |
+|------|-----------|
+| `tests/conftest.py` | 用假的 streamlit stub 載入 `app.py`，讓純邏輯函式可被測而不啟動 UI；提供共用 fixture。 |
+| `tests/test_rtf.py` | RTF 解析、整理空格、撰寫頁顯示 round-trip 等。 |
+| `tests/test_templates.py` | 每個模板動作的行為測試。 |
+| `tests/test_writeback.py` | 逆寫回歸：無損序列化、byte 穩定、明文編輯、`\uc0`、UUID 去重。 |
+| `tests/make_fixtures.py` | 產生合成測試檔（無版權內容、涵蓋各種邊角情境）。 |
+| `tests/fixtures/sample.pro6` | 上面產生的主要合成測試檔。 |
+| `tests/make_charset_deck.py` | 把極端字元字串做成一個 `.pro6`（每字串一張），方便在 ProPresenter 裡肉眼檢查顯示。 |
+| `tests/fixtures/charset_deck.pro6` | 上面產生的字元壓力測試檔。 |
+| `tests/manual_charset_samples.txt` | 手動測試用的極端字元樣本與操作步驟。 |
+
+### 文件
+| 檔案 | 功能與作用 |
+|------|-----------|
+| `README.md` | 本說明文件。 |
