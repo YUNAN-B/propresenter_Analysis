@@ -718,7 +718,7 @@ TEMPLATES: list[dict] = [
     {"name": "依換行拆分圖層",
      "desc": "把每一行都拆成獨立的圖層",
      "action": "split_lines"},
-    {"name": "圖層拆成投影片",
+    {"name": "依圖層拆分投影片",
      "desc": "把一張投影片裡的多個文字圖層，各自分成獨立的投影片（滿版置中）",
      "action": "layers_to_slides"},
     {"name": "全部投影片加圖層",
@@ -1629,10 +1629,11 @@ with tab_tpl:
     else:
         _TPL_CAT={
             "prune_empty":"統整","tidy":"統整","prune_slides":"統整",
+            "keep_first2":"統整","del_last":"統整",
             "tc2sc":"轉換","pinyin":"轉換",
             "reverse_layers":"操作",
             "split_lines":"操作","layers_to_slides":"操作","add_layer":"操作",
-            "keep_first2":"操作","del_last":"操作","merge_runs":"操作",
+            "merge_runs":"操作",
         }
         def _tpl_cat(t):
             return t.get("cat") or (_TPL_CAT.get(t.get("action"),"其他")
