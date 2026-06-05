@@ -1,0 +1,3 @@
+# 開發/測試用（執行 app 本身不需要）
+-r requirements.txt
+pytest>=8.0

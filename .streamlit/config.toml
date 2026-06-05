@@ -1,0 +1,15 @@
+# 黑/白兩套底都保留，可手動切換、也跟隨系統明暗。
+# 強調色固定淺藍 #879CD4，深色淺色都一樣。不鎖 base，才會保留切換鈕。
+[theme]
+primaryColor = "#879CD4"
+
+[theme.light]
+primaryColor = "#879CD4"
+
+[theme.dark]
+primaryColor = "#879CD4"
+
+[client]
+# 精簡 ⋮ 選單：只留開發者自訂的項目（關於此工具），
+# 藏掉 Clear cache / Print / Record a screencast / Rerun 等。
+toolbarMode = "minimal"

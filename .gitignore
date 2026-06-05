@@ -1,0 +1,27 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# 編輯器 / 工具
+.claude/
+.idea/
+.vscode/
+
+# 本機測試輸出（如有）
+*_test_output.*
+
+# 截圖 / 本機圖檔（hard-hat.png 例外，favicon 需要）
+截圖*.png
+Screenshot*.png
+S__*.jpg
+
+# 個人測試用的 ProPresenter 檔（根目錄；tests/fixtures 的合成檔不受影響）
+/*.pro6
+/*.xml

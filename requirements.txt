@@ -1,0 +1,3 @@
+streamlit>=1.30.0
+opencc-python-reimplemented>=0.1.7
+pypinyin>=0.50.0
