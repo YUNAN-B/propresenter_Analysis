@@ -1664,9 +1664,6 @@ with tab_tpl:
                 elif action=="prune_slides":
                     st.checkbox("保留只有背景影片/圖片的投影片",
                                 value=True, key=f"keepbg_{ti}")
-                elif action=="split_lines":
-                    st.checkbox("拆成獨立投影片（每行一張，而非多圖層）",
-                                value=False, key=f"slide_{ti}")
                 elif action=="tidy":
                     st.checkbox("連單換行都刪（接成一行、補空格；空行段落保留）",
                                 value=False, key=f"dropnl_{ti}")
@@ -1694,10 +1691,7 @@ with tab_tpl:
                             nb,n=_delete_empty_slides(src, st.session_state.get(f"keepbg_{ti}", True))
                             _commit(nb,n,f"已刪除 {n} 張無圖層的投影片")
                         elif action=="split_lines":
-                            if st.session_state.get(f"slide_{ti}", False):
-                                nb,n=_split_slide_lines(src); _commit(nb,n,f"已拆出 {n} 張新投影片")
-                            else:
-                                nb,n=_split_layer_lines(src); _commit(nb,n,f"已拆出 {n} 個新圖層")
+                            nb,n=_split_layer_lines(src); _commit(nb,n,f"已拆出 {n} 個新圖層")
                         elif action=="layers_to_slides":
                             nb,n=_split_layers_to_slides(src); _commit(nb,n,f"已把圖層拆成 {n} 張新投影片")
                         elif action=="keep_first2":
