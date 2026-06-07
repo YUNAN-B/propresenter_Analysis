@@ -1392,6 +1392,111 @@ def _apply_style(xml_bytes, style_name):
     return _xml_to_bytes(root,orig), n
 
 
+# ── 撰寫頁：段落類型（group）與熱鍵（hotKey）────────────────────
+# 段落類型＝名稱 ↔ 顏色綁定。色碼之後可調整；要加類型在這裡加一項即可。
+_GROUP_PRESETS = [
+    ("Verse",      "#3B6FD4"),   # 主歌・藍
+    ("Chorus",     "#D0021B"),   # 副歌・紅
+    ("Pre-Chorus", "#F5C518"),   # 黃
+    ("Bridge",     "#FFFFFF"),   # 白
+    ("Verse 2",    "#2E8B57"),   # 綠
+]
+_GROUP_COLOR = dict(_GROUP_PRESETS)
+# 撰寫頁 UI 用的彩色圓點（對應綁定色，標在類型名稱前面）
+_GROUP_EMOJI = {"Verse":"🔵", "Chorus":"🔴", "Pre-Chorus":"🟡", "Bridge":"⚪", "Verse 2":"🟢"}
+
+def _hex_rgba(hx: str, a: float = 1.0) -> str:
+    """#RRGGBB → ProPresenter 顏色字串「r g b a」(各 0~1，6 位小數)。"""
+    hx = hx.lstrip("#")
+    r, g, b = (int(hx[i:i+2], 16) / 255 for i in (0, 2, 4))
+    return f"{r:.6f} {g:.6f} {b:.6f} {a:.6f}"
+
+def _iter_slides_global(root):
+    """依文件順序產生 (group_element, group_index, slide_index_in_group, slide_element, global_num)。
+    global_num 從 1 起，與 _parse_xml 的 slide['num'] 一致。"""
+    gnode = root.find('.//array[@rvXMLIvarName="groups"]')
+    n = 0
+    for gi, g in enumerate(gnode.findall("RVSlideGrouping") if gnode is not None else []):
+        sarr = g.find('array[@rvXMLIvarName="slides"]')
+        for si, s in enumerate(sarr if sarr is not None else []):
+            n += 1
+            yield g, gi, si, s, n
+
+def _merge_adjacent_groups(gnode):
+    """合併相鄰且 name+color 完全相同的群組（把後者的 slides 併入前者後刪除後者）。"""
+    prev = None
+    for g in list(gnode.findall("RVSlideGrouping")):
+        if (prev is not None and g.get("name") == prev.get("name")
+                and g.get("color") == prev.get("color")):
+            ps = prev.find('array[@rvXMLIvarName="slides"]')
+            gs = g.find('array[@rvXMLIvarName="slides"]')
+            for s in list(gs if gs is not None else []): ps.append(s)
+            gnode.remove(g)
+        else:
+            prev = g
+
+def _set_group_fill(xml_bytes: bytes, num: int, name: str, color_hex: str) -> tuple:
+    """設定第 num 張的段落類型：把「該張往後、同一組的連續範圍」整段歸到新類型
+    （遇到下一個不同群組就停＝原群組的尾端）。第一張即整組改名換色；否則把該組從
+    這張切開、後段移進新群組。最後合併相鄰同類型。回傳 (new_bytes, err)。"""
+    root, orig = _load_root(xml_bytes)
+    target = next((t for t in _iter_slides_global(root) if t[4] == num), None)
+    if target is None: return xml_bytes, "找不到投影片"
+    grouping, _gi, si, _s, _ = target
+    color = _hex_rgba(color_hex)
+    gnode = root.find('.//array[@rvXMLIvarName="groups"]')
+    sarr = grouping.find('array[@rvXMLIvarName="slides"]')
+    slides = list(sarr if sarr is not None else [])
+    if si == 0:                                  # 整組就是這個範圍 → 直接改名換色
+        grouping.set("name", name); grouping.set("color", color)
+    else:                                        # 從第 si 張切開，後段移進新群組
+        moved = slides[si:]
+        for s in moved: sarr.remove(s)
+        newg = ET.Element("RVSlideGrouping")
+        newg.set("name", name); newg.set("color", color); newg.set("uuid", _new_uuid())
+        narr = ET.SubElement(newg, "array"); narr.set("rvXMLIvarName", "slides")
+        for s in moved: narr.append(s)
+        gnode.insert(list(gnode).index(grouping) + 1, newg)
+    _merge_adjacent_groups(gnode)
+    return _xml_to_bytes(root, orig), None
+
+def _hotkey_owner(xml_bytes: bytes, key: str, exclude: int = -1):
+    """回傳目前使用熱鍵 key 的投影片 global_num（排除 exclude）；無則 None。"""
+    if not key: return None
+    root = ET.fromstring(xml_bytes.decode("utf-8"))
+    for _g, _gi, _si, s, n in _iter_slides_global(root):
+        if n != exclude and s.get("hotKey", "") == key:
+            return n
+    return None
+
+def _set_slide_hotkey(xml_bytes: bytes, num: int, key: str) -> tuple:
+    """設定第 num 張的熱鍵為 key（空字串＝清除）。為保唯一，會先把同一個鍵從其他
+    投影片清掉（覆蓋／替代舊的）。回傳 (new_bytes, err)。"""
+    root, orig = _load_root(xml_bytes)
+    target = None
+    for _g, _gi, _si, s, n in _iter_slides_global(root):
+        if key and n != num and s.get("hotKey", "") == key:
+            s.set("hotKey", "")                  # 移除舊持有者（唯一性）
+        if n == num: target = s
+    if target is None: return xml_bytes, "找不到投影片"
+    target.set("hotKey", key)
+    return _xml_to_bytes(root, orig), None
+
+def _normalize_preset_groups(xml_bytes: bytes) -> bytes:
+    """匯入時用：群組名稱若已是預設類型（Verse/Chorus…），把它的顏色設成綁定色，
+    讓匯入檔的群組直接對齊預設狀態。沒有相符的群組則原樣回傳（byte 不變）。"""
+    root, orig = _load_root(xml_bytes)
+    gnode = root.find('.//array[@rvXMLIvarName="groups"]')
+    changed = False
+    for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
+        hexc = _GROUP_COLOR.get(g.get("name", ""))
+        if hexc is None: continue
+        want = _hex_rgba(hexc)
+        if g.get("color") != want:
+            g.set("color", want); changed = True
+    return _xml_to_bytes(root, orig) if changed else xml_bytes
+
+
 # ═══════════════════════════════════════════════════════════════
 # §7  UI
 # ═══════════════════════════════════════════════════════════════
@@ -1418,6 +1523,11 @@ st.markdown("""
 html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 .stCodeBlock,code,pre{font-family:'IBM Plex Mono',monospace!important;font-size:0.78rem!important;}
 .stTabs [data-baseweb="tab"]{font-weight:700;font-size:0.9rem;padding:0.5rem 1.5rem;}
+/* 撰寫頁 slide 標頭：緊湊化 + 熱鍵正方形/大寫 */
+[class*="st-key-hk_"] input{width:2.3rem;height:2.3rem;text-align:center;padding:0;
+  text-transform:uppercase;font-weight:700;font-size:1rem;}
+[class*="st-key-hk_"]{width:2.3rem;}
+[class*="st-key-grpbtn_"] button{padding:.1rem .5rem;min-height:0;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1432,7 +1542,8 @@ def _commit_change(tpl_name, nb, cnt, msg):
     _push_undo()
     st.session_state["xml_content"]=nb
     st.session_state["history"].append(f"{tpl_name}({cnt})")
-    for kk in [kk for kk in st.session_state if kk.startswith("txt_")]:
+    for kk in [kk for kk in st.session_state
+               if kk.startswith(("txt_","empty_","grp_","hk_"))]:
         st.session_state.pop(kk, None)
     st.session_state["_tpl_msg"]=msg          # 下一輪以 st.toast 飄出
     st.rerun()
@@ -1457,11 +1568,14 @@ def _pinyin_dialog(ti, tpl_name):
 def _load_new_doc(raw, name):
     """把一份檔案（上傳／創造／覆蓋）載入為目前編輯對象，重置歷史。"""
     ss=st.session_state
+    # 匯入時：群組名稱若已是預設類型，先把顏色對齊綁定狀態
+    try: raw=_normalize_preset_groups(raw)
+    except Exception: pass
     ss["_fk"]=(name, len(raw)); ss["xml_original"]=raw; ss["xml_content"]=raw
     ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]
     ss["export_name"]=name.rsplit(".",1)[0]
     # 清掉舊檔的撰寫頁輸入框快取，否則新檔會沿用同 key 顯示成舊內容
-    for k in [k for k in ss if k.startswith("txt_") or k.startswith("empty_")]:
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_"))]:
         ss.pop(k, None)
 
 def _request_new(xml, name):
@@ -1573,7 +1687,7 @@ with st.sidebar:
                  disabled=not _undo):
         st.session_state["xml_content"]=_undo.pop()
         if st.session_state.get("history"): st.session_state["history"].pop()
-        for k in [k for k in st.session_state if k.startswith("txt_")]:
+        for k in [k for k in st.session_state if k.startswith(("txt_","empty_","grp_","hk_"))]:
             st.session_state.pop(k, None)
         st.rerun()
     st.divider()
@@ -1748,6 +1862,8 @@ def _write_tab():
 
     if st.session_state.get("_text_err"):
         st.error(f"{st.session_state.pop('_text_err')}")
+    if st.session_state.get("_hk_msg"):
+        st.info(st.session_state.pop("_hk_msg"), icon="⌨️")
 
     def _save_text_layer(gi, si, li, run_keys):
         """單行輸入框失焦自動儲存：把顯示文字補回段間換行後寫入。"""
@@ -1781,6 +1897,30 @@ def _write_tab():
         st.session_state.pop(key, None)
         st.session_state["history"].append(f"文字G{gi}S{si}L{li}")
 
+    def _set_group(num, name, color):
+        """按了段落類型按鈕：從這張往後（同組連續範圍）整段套用名稱+顏色，整頁刷新。"""
+        xml=st.session_state["xml_content"]
+        nb,err=_set_group_fill(xml, num, name, color)
+        if not err and nb is not xml:
+            _push_undo(); st.session_state["xml_content"]=nb
+            st.session_state["history"].append(f"群組S{num}:{name}")
+        st.rerun()                                   # 整頁刷新，連帶更新側邊欄群組
+
+    def _save_hotkey(num):
+        """設定熱鍵（自動轉大寫）；若該鍵已被別張用，覆蓋（從舊的移走）並提示。"""
+        key=st.session_state.get(f"hk_{num}","").strip().upper()
+        xml=st.session_state["xml_content"]
+        owner=_hotkey_owner(xml, key, exclude=num) if key else None
+        nb,err=_set_slide_hotkey(xml, num, key)
+        if err: st.session_state["_text_err"]=err; return
+        if nb is xml: return
+        _push_undo(); st.session_state["xml_content"]=nb
+        if owner:
+            st.session_state["_hk_msg"]=f"熱鍵「{key}」原本在 Slide {owner}，已覆蓋改設到 Slide {num}"
+        st.session_state["history"].append(f"熱鍵S{num}")
+        for k in [k for k in st.session_state if k.startswith("hk_")]:
+            st.session_state.pop(k, None)
+
     def _swatch(hx):
         if not hx or hx=="?": return ""
         return (f'<span style="display:inline-block;width:10px;height:10px;border:1px solid #999;'
@@ -1790,18 +1930,27 @@ def _write_tab():
         text_slides=[sl for sl in g["slides"]
                      if any(l["type"]=="RVTextElement" for l in sl["layers"])]
         if not text_slides: continue
-        c=g["color"]
-        dot=(f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
-             f'background:{c};margin-right:5px;vertical-align:middle"></span>'
-             if c!="transparent" else "")
-        st.markdown(
-            f'<p style="font-size:.8rem;font-weight:700;margin:.6rem 0 .2rem">'
-            f'{dot} {g["name"]}  <span style="font-weight:400;color:#888">{len(text_slides)} 張</span></p>',
-            unsafe_allow_html=True)
         for si,slide in enumerate(text_slides):
             si_orig=next(i for i,s in enumerate(g["slides"]) if s["num"]==slide["num"])
-            lbl=slide["label"] or f"Slide {slide['num']}"
-            st.markdown(f"`Slide {slide['num']}` {lbl}")
+            num=slide["num"]
+            lbl=slide["label"] or f"Slide {num}"
+            # slide 標頭：外層 [1,3] 與下方編輯列同切，使右側控制區左緣對齊文字輸入框；
+            # 控制區內（左→右、緊鄰）：正方形單字熱鍵 ＋ 段落類型(窄,彩色 popover)
+            _lab,_ctrl=st.columns([1,3], vertical_alignment="center")
+            _lab.markdown(f"`Slide {num}` {lbl}")
+            _hk,_h2,_sp=_ctrl.columns([1,3,8], gap="small", vertical_alignment="center")
+            if f"hk_{num}" not in st.session_state:
+                st.session_state[f"hk_{num}"]=slide["hotKey"]
+            _hk.text_input("熱鍵", key=f"hk_{num}", max_chars=1, autocomplete="off",
+                           placeholder="鍵", label_visibility="collapsed",
+                           on_change=_save_hotkey, args=(num,))
+            _cur=g["name"]
+            _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur if _cur in _GROUP_EMOJI else '段落'}"
+            with _h2.popover(_curlabel, use_container_width=True):
+                for _gname,_ghex in _GROUP_PRESETS:
+                    if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
+                                 key=f"grpbtn_{num}_{_gname}", use_container_width=True):
+                        _set_group(num, _gname, _ghex)
             for layer in [l for l in slide["layers"] if l["type"]=="RVTextElement"]:
                 if not layer["runs"]:
                     # 空圖層：標注 + 留一個可編輯空框（打字即填回該層）
@@ -1851,9 +2000,10 @@ def _write_tab():
                                       args=(gi, si_orig, layer["idx"], run_keys))
                     # 段落之間留間距，讓不同段更分明
                     if ri < len(layer["runs"])-1:
-                        st.markdown("<div style='height:.9rem'></div>",
+                        st.markdown("<div style='height:.5rem'></div>",
                                     unsafe_allow_html=True)
-            st.markdown("---")
+            st.markdown("<hr style='margin:.25rem 0;border:none;border-top:1px solid #eee'>",
+                        unsafe_allow_html=True)
 
 
 with tab_text:

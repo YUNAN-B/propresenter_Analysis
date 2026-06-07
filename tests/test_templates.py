@@ -205,3 +205,70 @@ def test_add_layer_all(app, sample):
     assert n == 7 and _ok(nb)                          # 7 張各加一層
     allt = [t for _, _, tl in _layers(app, nb) for _, _, t, _ in tl]
     assert allt.count("-") == 7
+
+
+# ── 撰寫頁：段落類型（group）與熱鍵 ────────────────────────────────
+def _groups(app, b):
+    """回傳 [(group名, 張數)...]，依文件順序。"""
+    root = ET.fromstring(b.decode())
+    out = []
+    for g in root.find('.//array[@rvXMLIvarName="groups"]').findall("RVSlideGrouping"):
+        sl = g.find('array[@rvXMLIvarName="slides"]')
+        out.append((g.get("name"), len(list(sl)) if sl is not None else 0))
+    return out
+
+def _deck6(app):
+    return app._build_pro6_structured("\n\n".join(f"S{i}" for i in range(1, 7)),
+                                      "空行", "空行")  # 1 組、6 張
+
+def test_group_fill_split(app):
+    b = _deck6(app)
+    assert _groups(app, b) == [("", 6)]
+    b, _ = app._set_group_fill(b, 1, "Verse", "#3B6FD4")
+    assert _groups(app, b) == [("Verse", 6)]                 # 第一張 → 整組
+    b, _ = app._set_group_fill(b, 4, "Chorus", "#D0021B")
+    assert _groups(app, b) == [("Verse", 3), ("Chorus", 3)]  # 從第4張切開
+    b, _ = app._set_group_fill(b, 2, "Pre-Chorus", "#F5C518")
+    assert _groups(app, b) == [("Verse", 1), ("Pre-Chorus", 2), ("Chorus", 3)]
+    assert _ok(b) and sum(n for _, n in _groups(app, b)) == 6  # 張數守恆
+
+def test_group_fill_merge_adjacent(app):
+    b = _deck6(app)
+    b, _ = app._set_group_fill(b, 4, "Chorus", "#D0021B")
+    b, _ = app._set_group_fill(b, 1, "Chorus", "#D0021B")    # 全變 Chorus
+    assert _groups(app, b) == [("Chorus", 6)]                # 相鄰同類型合併
+
+def test_group_color_written(app):
+    b = _deck6(app)
+    b, _ = app._set_group_fill(b, 1, "Chorus", "#D0021B")
+    root = ET.fromstring(b.decode())
+    col = root.find('.//RVSlideGrouping').get("color")
+    r, g, bl, a = (float(x) for x in col.split())
+    assert abs(r - 0xD0/255) < 1e-4 and abs(g - 0x02/255) < 1e-4 and a == 1.0
+
+def test_hotkey_set_and_overwrite(app):
+    b = app._build_pro6_structured("A\n\nB\n\nC", "空行", "空行")
+    b, _ = app._set_slide_hotkey(b, 1, "C")
+    assert app._hotkey_owner(b, "C") == 1
+    b, _ = app._set_slide_hotkey(b, 3, "C")                  # 重複 → 從第1張移走
+    assert app._hotkey_owner(b, "C") == 3
+    root = ET.fromstring(b.decode())
+    hks = [s.get("hotKey", "") for *_, s, _n in app._iter_slides_global(root)]
+    assert hks == ["", "", "C"] and _ok(b)
+
+def test_hotkey_clear(app):
+    b = app._build_pro6_structured("A\n\nB", "空行", "空行")
+    b, _ = app._set_slide_hotkey(b, 1, "X")
+    b, _ = app._set_slide_hotkey(b, 1, "")                   # 清空
+    assert app._hotkey_owner(b, "X") is None
+
+def test_normalize_preset_groups(app):
+    b = app._build_pro6_structured("A\n\nB", "空行", "空行")
+    root = ET.fromstring(b.decode())
+    g = root.find('.//RVSlideGrouping'); g.set("name", "Chorus"); g.set("color", "0 0 0 1")
+    b = app._xml_to_bytes(root, b.decode())
+    b2 = app._normalize_preset_groups(b)                    # Chorus → 綁定紅
+    assert ET.fromstring(b2.decode()).find('.//RVSlideGrouping').get("color") == app._hex_rgba("#D0021B")
+    # 非預設名稱不動（byte 不變）
+    b3 = app._build_pro6_structured("X\n\nY", "空行", "空行")
+    assert app._normalize_preset_groups(b3) == b3
