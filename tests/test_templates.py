@@ -135,20 +135,20 @@ def test_tidy_drop_single_nl(app):
     # drop_nl=False 維持原本：不動換行
     assert app._tidy_runs([NS(text="主\n愛我")])[0] == "主\n愛我"
 
-def test_merge_runs_no_gap(app, sample):
-    # 合併「因格式不同而切開的 run」：交界不留空格、不留換行；run 內部換行保留
+def test_merge_runs_keep_lines(app, sample):
+    # 合併「因格式不同而切開的 run」：統一樣式但「保留換行與行結構」，只去行首尾空白
     from types import SimpleNamespace as NS
     j = app._merge_runs_plain
-    assert j([NS(text="紅"), NS(text="\n藍")]) == "紅藍"                # 交界換行去掉
-    assert j([NS(text="主啊 "), NS(text="\n敬拜")]) == "主啊敬拜"        # 交界空格＋換行都去
-    assert j([NS(text="主啊"), NS(text="\n　敬拜")]) == "主啊敬拜"        # 全形空格也去
-    assert j([NS(text="紅\n\n"), NS(text="藍")]) == "紅藍"             # 交界雙換行也清乾淨
-    assert j([NS(text="A\nB"), NS(text="\nC")]) == "A\nBC"            # run 內部換行保留
-    # 端對端：fixture 的 multicolor（紅 cf1 / 藍 cf2 兩 run）併成單段「紅藍」、無間隔
+    assert j([NS(text="紅"), NS(text="\n藍")]) == "紅\n藍"               # 換行保留
+    assert j([NS(text="主啊 "), NS(text="\n敬拜")]) == "主啊\n敬拜"       # 行尾空格去掉、換行留
+    assert j([NS(text="主啊"), NS(text="\n　敬拜")]) == "主啊\n敬拜"       # 行首全形空格也去
+    assert j([NS(text="A\nB"), NS(text="\nC")]) == "A\nB\nC"           # 多行全保留
+    assert j([NS(text="第一行\n第二行\n第三行")]) == "第一行\n第二行\n第三行"  # 不會被併成一行
+    # 端對端：fixture multicolor（紅 cf1 / 藍 cf2）→ 併成單一樣式、仍是兩行「紅\n藍」
     nb, n = app._merge_layer_runs(sample)
     assert _ok(nb) and n >= 1
     mc = [tl for num, lab, tl in _layers(app, nb) if lab == "multicolor"][0]
-    assert len(mc) == 1 and mc[0][2] == "紅藍"
+    assert len(mc) == 1 and mc[0][2] == "紅\n藍"
 
 def test_build_pro6_bilingual(app):
     nb = app._build_pro6_bilingual("讚美主\n哈利路亞", "Praise\nHallelu")
@@ -272,3 +272,15 @@ def test_normalize_preset_groups(app):
     # 非預設名稱不動（byte 不變）
     b3 = app._build_pro6_structured("X\n\nY", "空行", "空行")
     assert app._normalize_preset_groups(b3) == b3
+
+def test_delete_slide_by_num(app):
+    b = app._build_pro6_structured("A\n\nB\n\nC", "空行", "空行")
+    b2, err = app._delete_slide_by_num(b, 2)               # 刪中間那張
+    assert err is None and _ok(b2)
+    texts = ["".join(t for _,_,t,_ in tl) for _,_,tl in _layers(app, b2)]
+    assert len(_layers(app, b2)) == 2 and "B" not in "".join(texts)
+    # 刪到群組變空 → 群組也移除
+    b3 = app._build_pro6_structured("X", "空行", "空行")
+    b3, _ = app._delete_slide_by_num(b3, 1)
+    root = ET.fromstring(b3.decode())
+    assert len(root.find('.//array[@rvXMLIvarName="groups"]').findall("RVSlideGrouping")) == 0

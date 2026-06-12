@@ -1048,23 +1048,21 @@ def _del_last_layer(xml_bytes: bytes) -> tuple:
     return _xml_to_bytes(root,orig), n
 
 def _merge_runs_plain(runs) -> str:
-    """同圖層內因「文字格式（類型）不同」而切開的多個 run（非空），合併成單一明文：
-    相鄰 run 在交界處直接相接 —— 去掉交界的換行與各種空白（半/全形、tab、NBSP、
-    零寬等），不留空格也不留換行；run 內部（同格式）的換行則原樣保留。
-    例：「紅」＋「\\n藍」→「紅藍」；「主啊 」＋「\\n敬拜」→「主啊敬拜」。"""
-    def _seam(ch): return ch in "\n\r" or _is_ws(ch)        # 交界要清掉的：換行＋空白
-    merged=runs[0].text
-    for r in runs[1:]:
-        a=len(merged)
-        while a>0 and _seam(merged[a-1]): a-=1              # 去前一 run 尾端的交界字元
-        t=r.text; b=0
-        while b<len(t) and _seam(t[b]): b+=1                # 去後一 run 首端的交界字元
-        merged=merged[:a]+t[b:]
-    return merged
+    """把多個 run 合併成單一樣式的明文：**保留全部文字與行結構**（行與行之間的換行
+    保留，不會併成一行），只去掉各行行首尾殘留的水平空白（半/全形、tab、NBSP、零寬等）。
+    傳入完整 run 串列（含純空白 run）以免漏掉交界換行。
+    例：「紅」＋「\\n藍」→「紅\\n藍」；「主啊 」＋「\\n敬拜」→「主啊\\n敬拜」。"""
+    out=[]
+    for line in "".join(r.text for r in runs).split("\n"):
+        a=0; b=len(line)
+        while a<b and _is_ws(line[a]):   a+=1      # 去行首水平空白
+        while b>a and _is_ws(line[b-1]): b-=1      # 去行尾水平空白
+        out.append(line[a:b])
+    return "\n".join(out)
 
 def _merge_layer_runs(xml_bytes: bytes) -> tuple:
     """把每個文字圖層內因格式不同而切開的多個 run，合併成單一樣式（取首個 run 的
-    字體/字級/顏色），保留全部文字、交界不留空格（見 _merge_runs_plain）。
+    字體/字級/顏色），保留全部文字與行結構（見 _merge_runs_plain）。
     回傳 (new_bytes, n_layers_changed)。"""
     root, orig = _load_root(xml_bytes); n=0
     for sl, elems in _iter_slides(root):
@@ -1073,9 +1071,9 @@ def _merge_layer_runs(xml_bytes: bytes) -> tuple:
             if el.tag!="RVTextElement": continue
             rtf=_decode_rtf(_rtf_node(el))
             if rtf is None: continue
-            runs=[r for r in parse_rtf(rtf, keep_empty=True).runs if r.text.strip()]
-            if len(runs)<=1: continue            # 本來就單段就不動
-            if _set_el_text(el, _merge_runs_plain(runs)): n+=1   # 以首段樣式重寫整層文字
+            allruns=parse_rtf(rtf, keep_empty=True).runs
+            if sum(1 for r in allruns if r.text.strip())<=1: continue  # 單段（或更少）不動
+            if _set_el_text(el, _merge_runs_plain(allruns)): n+=1      # 以首段樣式重寫整層
     return _xml_to_bytes(root,orig), n
 
 def _apply_tc2sc(xml_bytes: bytes, reverse: bool=False) -> tuple:
@@ -1496,6 +1494,20 @@ def _normalize_preset_groups(xml_bytes: bytes) -> bytes:
             g.set("color", want); changed = True
     return _xml_to_bytes(root, orig) if changed else xml_bytes
 
+def _delete_slide_by_num(xml_bytes: bytes, num: int) -> tuple:
+    """刪除第 num 張投影片；若其群組因此變空，連同空群組一起移除。
+    回傳 (new_bytes, err)。"""
+    root, orig = _load_root(xml_bytes)
+    for g, _gi, _si, s, n in _iter_slides_global(root):
+        if n == num:
+            sarr = g.find('array[@rvXMLIvarName="slides"]')
+            sarr.remove(s)
+            if len(list(sarr)) == 0:                 # 群組空了 → 一併移除
+                gnode = root.find('.//array[@rvXMLIvarName="groups"]')
+                gnode.remove(g)
+            return _xml_to_bytes(root, orig), None
+    return xml_bytes, "找不到投影片"
+
 
 # ═══════════════════════════════════════════════════════════════
 # §7  UI
@@ -1524,10 +1536,17 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 .stCodeBlock,code,pre{font-family:'IBM Plex Mono',monospace!important;font-size:0.78rem!important;}
 .stTabs [data-baseweb="tab"]{font-weight:700;font-size:0.9rem;padding:0.5rem 1.5rem;}
 /* 撰寫頁 slide 標頭：緊湊化 + 熱鍵正方形/大寫 */
-[class*="st-key-hk_"] input{width:2.3rem;height:2.3rem;text-align:center;padding:0;
-  text-transform:uppercase;font-weight:700;font-size:1rem;}
-[class*="st-key-hk_"]{width:2.3rem;}
+/* 熱鍵：正方形、不被橫向容器拉伸 */
+[class*="st-key-hk_"]{width:2.6rem!important;flex:0 0 auto!important;}
+[class*="st-key-hk_"] input{width:2.6rem!important;height:2.6rem!important;text-align:center;
+  text-transform:uppercase;font-weight:700;font-size:1rem;padding:0;}
+/* 段落 popover：用內容寬度（不被壓窄/換行） */
+[class*="st-key-grppop_"]{flex:0 0 auto!important;}
+[class*="st-key-grppop_"]>button{white-space:nowrap;}
 [class*="st-key-grpbtn_"] button{padding:.1rem .5rem;min-height:0;}
+/* 刪除鈕：與熱鍵同尺寸的正方形 */
+[class*="st-key-delbtn_"]{flex:0 0 auto!important;}
+[class*="st-key-delbtn_"] button{width:2.6rem!important;height:2.6rem!important;padding:0;min-height:0;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1595,6 +1614,24 @@ def _overwrite_dialog():
         st.rerun()
     if c2.button("取消", key="ow_no", use_container_width=True):
         st.session_state.pop("_overwrite_new", None); st.rerun()
+
+@st.dialog("刪除投影片")
+def _del_slide_dialog(num):
+    """撰寫頁刪除某張的確認框。"""
+    st.warning(f"確定要刪除 **Slide {num}**？刪除後可用左側「還原」復原。")
+    c1,c2=st.columns(2)
+    if c1.button("確認刪除", key=f"delok_{num}", type="primary", use_container_width=True):
+        nb,err=_delete_slide_by_num(st.session_state["xml_content"], num)
+        st.session_state.pop("_del_ask", None)
+        if err: st.session_state["_text_err"]=err
+        else:
+            _push_undo(); st.session_state["xml_content"]=nb
+            st.session_state["history"].append(f"刪除S{num}")
+            for k in [k for k in st.session_state if k.startswith(("txt_","empty_","hk_"))]:
+                st.session_state.pop(k, None)
+        st.rerun()
+    if c2.button("取消", key=f"delcancel_{num}", use_container_width=True):
+        st.session_state.pop("_del_ask", None); st.rerun()
 
 def _create_ui():
     """創造：單欄＝可選換頁／換圖層依據；按右側「＋」開右欄做雙排（雙語）逐行配對。"""
@@ -1935,22 +1972,24 @@ def _write_tab():
             num=slide["num"]
             lbl=slide["label"] or f"Slide {num}"
             # slide 標頭：外層 [1,3] 與下方編輯列同切，使右側控制區左緣對齊文字輸入框；
-            # 控制區內（左→右、緊鄰）：正方形單字熱鍵 ＋ 段落類型(窄,彩色 popover)
+            # 控制區＝零間距水平容器：熱鍵 ＋ 段落 popover ＋ 刪除鈕(緊貼相鄰)
             _lab,_ctrl=st.columns([1,3], vertical_alignment="center")
             _lab.markdown(f"`Slide {num}` {lbl}")
-            _hk,_h2,_sp=_ctrl.columns([1,3,8], gap="small", vertical_alignment="center")
-            if f"hk_{num}" not in st.session_state:
-                st.session_state[f"hk_{num}"]=slide["hotKey"]
-            _hk.text_input("熱鍵", key=f"hk_{num}", max_chars=1, autocomplete="off",
-                           placeholder="鍵", label_visibility="collapsed",
-                           on_change=_save_hotkey, args=(num,))
-            _cur=g["name"]
-            _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur if _cur in _GROUP_EMOJI else '段落'}"
-            with _h2.popover(_curlabel, use_container_width=True):
-                for _gname,_ghex in _GROUP_PRESETS:
-                    if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
-                                 key=f"grpbtn_{num}_{_gname}", use_container_width=True):
-                        _set_group(num, _gname, _ghex)
+            with _ctrl.container(horizontal=True, gap="xsmall", vertical_alignment="center"):
+                if f"hk_{num}" not in st.session_state:
+                    st.session_state[f"hk_{num}"]=slide["hotKey"]
+                st.text_input("熱鍵", key=f"hk_{num}", max_chars=1, autocomplete="off",
+                              placeholder="鍵", label_visibility="collapsed",
+                              on_change=_save_hotkey, args=(num,))
+                _cur=g["name"]
+                _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur if _cur in _GROUP_EMOJI else '段落'}"
+                with st.popover(_curlabel, key=f"grppop_{num}"):
+                    for _gname,_ghex in _GROUP_PRESETS:
+                        if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
+                                     key=f"grpbtn_{num}_{_gname}", use_container_width=True):
+                            _set_group(num, _gname, _ghex)
+                if st.button("🗑", key=f"delbtn_{num}", help="刪除這張投影片"):
+                    st.session_state["_del_ask"]=num; st.rerun()
             for layer in [l for l in slide["layers"] if l["type"]=="RVTextElement"]:
                 if not layer["runs"]:
                     # 空圖層：標注 + 留一個可編輯空框（打字即填回該層）
@@ -2009,6 +2048,8 @@ def _write_tab():
 with tab_text:
     st.caption("單行輸入，段內換行請打 \\n。各段保留原字體/字級/顏色；段與段之間的換行會自動處理、不顯示。"
                "清空某段並失焦即刪除該段。（繁→簡、拼音在「模板」分頁）")
+    if st.session_state.get("_del_ask") is not None:     # 刪除投影片確認框
+        _del_slide_dialog(st.session_state["_del_ask"])
     _write_tab()
 
 
