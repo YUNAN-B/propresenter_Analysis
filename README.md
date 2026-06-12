@@ -58,7 +58,6 @@ python tests/make_fixtures.py    # 需要時重新產生測試資料
 | 檔案 | 功能與作用 |
 |------|-----------|
 | `app.py` | **主程式**（Streamlit）。RTF/XML 解析、模板批次動作、撰寫頁定點逆寫、創造新檔，全部在這一支。檔頭有「核心不變量」說明，動程式碼前必讀。 |
-| `forRTFdata.py` | 獨立的**命令列** RTF/XML 解析器（`python forRTFdata.py file.xml`）。早期原型，現作參考／除錯用，app 不會匯入它。 |
 
 ### 樣式
 | 檔案 | 功能與作用 |
