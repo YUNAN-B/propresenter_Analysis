@@ -1,11 +1,11 @@
 """產生合成的測試用 .pro6（無版權歌詞、無個人路徑）。
 
 手刻 RTF + XML 作為「正確答案」，刻意涵蓋各種邊角情境：
-  s1 雙語多行中文 + 英文      → 拼音、依換行拆分
-  s2 撇號 + 多餘空白 + 無\\uc0  → 刪前後/整理空白、\\uc0 回歸（I've→I'e）
-  s3 空圖層 + Double-click    → 清除空圖層
+  s1 雙語多行中文 + 英文      → 拼音、反轉圖層、樣式
+  s2 撇號 + 多餘空白 + 無\\uc0  → 整理空格、\\uc0 回歸（I've→I'e）
+  s3 空圖層 + Double-click    → 空圖層/placeholder 樣本
   s4 無 displayElements       → 刪除無圖層投影片
-  s5 多色（兩段不同顏色）       → 顏色保留
+  s5 多色（兩段不同顏色）       → 顏色保留、合併圖層段落
   s6/s7 重複 UUID            → 匯出去重
 
 執行：python tests/make_fixtures.py  → 寫出 tests/fixtures/sample.pro6
