@@ -284,3 +284,16 @@ def test_delete_slide_by_num(app):
     b3, _ = app._delete_slide_by_num(b3, 1)
     root = ET.fromstring(b3.decode())
     assert len(root.find('.//array[@rvXMLIvarName="groups"]').findall("RVSlideGrouping")) == 0
+
+def test_load_new_doc_fk_uses_original_size(app):
+    # 回歸：匯入有預設群組名（會被正規化、byte 數改變）的檔時，_fk 必須用「原始」長度，
+    # 否則每次 rerun 會與上傳端 uploaded.size 對不上 → 重載原檔、洗掉模板/編輯結果。
+    b = app._build_pro6_structured("A\n\nB", "空行", "空行")
+    root = ET.fromstring(b.decode())
+    g = root.find('.//RVSlideGrouping'); g.set("name", "Chorus"); g.set("color", "0 0 0 1")
+    raw = app._xml_to_bytes(root, b.decode())
+    assert app._normalize_preset_groups(raw) != raw          # 正規化確實改了 byte
+    app.st.session_state.clear()
+    app._load_new_doc(raw, "song.pro6")
+    assert app.st.session_state["_fk"] == ("song.pro6", len(raw))   # 用原始長度
+    assert app.st.session_state["xml_content"] == app._normalize_preset_groups(raw)

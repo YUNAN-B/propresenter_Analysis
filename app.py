@@ -1587,10 +1587,13 @@ def _pinyin_dialog(ti, tpl_name):
 def _load_new_doc(raw, name):
     """把一份檔案（上傳／創造／覆蓋）載入為目前編輯對象，重置歷史。"""
     ss=st.session_state
-    # 匯入時：群組名稱若已是預設類型，先把顏色對齊綁定狀態
+    # _fk 用「原始」長度當識別，必須在正規化前算——否則正規化改了 byte 數，
+    # 會與上傳端的 uploaded.size 對不上，導致每次 rerun 都重載原檔、洗掉所有編輯。
+    ss["_fk"]=(name, len(raw))
+    # 匯入時：群組名稱若已是預設類型，把顏色對齊綁定狀態
     try: raw=_normalize_preset_groups(raw)
     except Exception: pass
-    ss["_fk"]=(name, len(raw)); ss["xml_original"]=raw; ss["xml_content"]=raw
+    ss["xml_original"]=raw; ss["xml_content"]=raw
     ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]
     ss["export_name"]=name.rsplit(".",1)[0]
     # 清掉舊檔的撰寫頁輸入框快取，否則新檔會沿用同 key 顯示成舊內容
