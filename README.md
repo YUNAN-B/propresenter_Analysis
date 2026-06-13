@@ -47,9 +47,9 @@ streamlit run app.py
 明文編輯，以及 `\uc0` 這類編碼回歸。
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                           # 跑全部測試
-python tests/make_fixtures.py    # 需要時重新產生測試資料
+pip install -r requirements.txt   # 已含 pytest
+pytest                            # 跑全部測試
+python tests/make_fixtures.py     # 需要時重新產生測試資料
 ```
 
 ## 檔案地圖
@@ -68,8 +68,7 @@ python tests/make_fixtures.py    # 需要時重新產生測試資料
 ### 執行與設定
 | 檔案 | 功能與作用 |
 |------|-----------|
-| `requirements.txt` | 執行 app 需要的套件：streamlit／opencc／pypinyin。 |
-| `requirements-dev.txt` | 開發／測試額外需要的：pytest。 |
+| `requirements.txt` | 相依套件：streamlit／opencc／pypinyin（測試用的 pytest 也一併列入）。 |
 | `pytest.ini` | pytest 設定。 |
 | `.streamlit/config.toml` | Streamlit 主題（淺藍強調色、明暗可切換）與精簡的 ⋮ 工具選單。 |
 | `.devcontainer/devcontainer.json` | GitHub Codespaces／VS Code 開發容器設定（Python 3.11、自動裝相依）。 |
@@ -80,14 +79,10 @@ python tests/make_fixtures.py    # 需要時重新產生測試資料
 | 檔案 | 功能與作用 |
 |------|-----------|
 | `tests/conftest.py` | 用假的 streamlit stub 載入 `app.py`，讓純邏輯函式可被測而不啟動 UI；提供共用 fixture。 |
-| `tests/test_rtf.py` | RTF 解析、整理空格、撰寫頁顯示 round-trip 等。 |
-| `tests/test_templates.py` | 每個模板動作的行為測試。 |
-| `tests/test_writeback.py` | 逆寫回歸：無損序列化、byte 穩定、明文編輯、`\uc0`、UUID 去重。 |
+| `tests/test_rtf.py` | RTF 解析/整理空格/顯示 round-trip，以及逆寫回歸（無損序列化、byte 穩定、`\uc0`、UUID 去重）。 |
+| `tests/test_templates.py` | 每個模板動作、段落類型(group)/熱鍵、刪除投影片等行為測試。 |
 | `tests/make_fixtures.py` | 產生合成測試檔（無版權內容、涵蓋各種邊角情境）。 |
 | `tests/fixtures/sample.pro6` | 上面產生的主要合成測試檔。 |
-| `tests/make_charset_deck.py` | 把極端字元字串做成一個 `.pro6`（每字串一張），方便在 ProPresenter 裡肉眼檢查顯示。 |
-| `tests/fixtures/charset_deck.pro6` | 上面產生的字元壓力測試檔。 |
-| `tests/manual_charset_samples.txt` | 手動測試用的極端字元樣本與操作步驟。 |
 
 ### 文件
 | 檔案 | 功能與作用 |
