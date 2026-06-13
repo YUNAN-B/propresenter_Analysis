@@ -35,7 +35,6 @@ ProParse · 投影片解析 · Streamlit App
 """
 
 import base64
-import copy
 import json
 import os
 import re
@@ -697,9 +696,6 @@ def _doc_summary(xml_bytes: bytes):
 # action 對應的處理函式見 §6/§7 的 dispatch；分類見 §7 的 _TPL_CAT。
 
 TEMPLATES: list[dict] = [
-    {"name": "清除空圖層",
-     "desc": "刪掉內容為空的圖層",
-     "action": "prune_empty"},
     {"name": "整理空格",
      "desc": "刪頭尾的空白、合併文字中間的連續空白",
      "action": "tidy"},
@@ -715,21 +711,9 @@ TEMPLATES: list[dict] = [
     {"name": "反轉圖層順序",
      "desc": "把圖層順序鏡像顛倒",
      "action": "reverse_layers"},
-    {"name": "依換行拆分圖層",
-     "desc": "把每一行都拆成獨立的圖層",
-     "action": "split_lines"},
-    {"name": "依圖層拆分投影片",
-     "desc": "把一張投影片裡的多個文字圖層，各自分成獨立的投影片（滿版置中）",
-     "action": "layers_to_slides"},
-    {"name": "全部投影片加圖層",
-     "desc": "每張投影片都加一個新的文字圖層",
-     "action": "add_layer"},
     {"name": "只保留前兩個圖層",
      "desc": "每張投影片只留前兩個圖層，後面的都刪掉",
      "action": "keep_first2"},
-    {"name": "刪除每張最後一個圖層",
-     "desc": "把每張投影片最後一個圖層刪掉",
-     "action": "del_last"},
     {"name": "合併圖層段落",
      "desc": "把同一個圖層裡不同的段落合併",
      "action": "merge_runs"},
@@ -740,8 +724,6 @@ TEMPLATES: list[dict] = [
 # §6  XML WRITE-BACK
 # ═══════════════════════════════════════════════════════════════
 
-_PLACEHOLDER_TEXTS = {"double-click to edit", "double click to edit"}
-
 def _iter_slides(root):
     """走訪所有投影片，產生 (slide_element, displayElements_array_或_None)。"""
     gnode=root.find('.//array[@rvXMLIvarName="groups"]')
@@ -749,23 +731,6 @@ def _iter_slides(root):
         snode=g.find('array[@rvXMLIvarName="slides"]')
         for sl in (snode if snode is not None else []):
             yield sl, sl.find('array[@rvXMLIvarName="displayElements"]')
-
-def _prune_empty_layers(xml_bytes: bytes) -> tuple:
-    """刪除所有「無內文」或內文為 'Double-click to edit' 的文字圖層。
-    回傳 (new_bytes, n_removed)。"""
-    root, orig = _load_root(xml_bytes)
-    removed=0
-    for sl, elems in _iter_slides(root):
-        if elems is None: continue
-        for el in list(elems):
-            if el.tag!="RVTextElement": continue
-            rtf=_decode_rtf(_rtf_node(el))
-            plain="" if rtf is None else parse_rtf(rtf).plain()
-            norm=plain.strip()
-            if norm=="" or norm.lower() in _PLACEHOLDER_TEXTS:
-                elems.remove(el); removed+=1
-    return _xml_to_bytes(root,orig), removed
-
 
 def _layer_runs(xml_bytes: bytes, gi, si, li) -> list:
     """取得某圖層的非空 runs（與顯示用的 layer['runs'] 一致）。"""
@@ -844,152 +809,6 @@ def _apply_text_runs(xml_bytes: bytes, gi, si, li, run_texts: list) -> tuple:
     return _xml_to_bytes(root,orig), None
 
 
-def _runs_to_lines(runs) -> list:
-    """把非空 runs 依 \\n 切成行；回傳 [(line_text, owner_run_index), ...]，只保留有內容的行。
-    （已知性質：同一行內樣式不變，故每行屬於單一 run。）"""
-    lines=[]; buf=[]; owner=[None]
-    def flush():
-        if owner[0] is not None and "".join(buf).strip():
-            lines.append(("".join(buf), owner[0]))
-        buf.clear(); owner[0]=None
-    for ri,run in enumerate(runs):
-        for ch in run.text:
-            if ch=="\n": flush()
-            else:
-                buf.append(ch)
-                if owner[0] is None: owner[0]=ri
-    flush()
-    return lines
-
-def _shift_pos_y(pn, dy: int):
-    """把 position 節點的 y 加上 dy（其餘 x/z/w/h 不變）。"""
-    nums=re.findall(r"[-\d.]+", pn.text)
-    if len(nums)<5: return
-    x,y,z,w,h=nums[:5]
-    pn.text=f"{{{x} {int(float(y))+dy} {z} {w} {h}}}"
-
-def _split_layer_lines(xml_bytes: bytes) -> tuple:
-    """在文字圖層的換行處拆分：第 0 行留原圖層，其餘各行複製成新圖層放到後面，
-    位置依序略低（每行下移 原高/行數）。回傳 (new_bytes, n_new_layers)。"""
-    root, orig = _load_root(xml_bytes)
-    n_new=0
-    for sl, elems in _iter_slides(root):
-        if elems is None: continue
-        for el in list(elems):
-            if el.tag!="RVTextElement": continue
-            rtf=_decode_rtf(_rtf_node(el))
-            if rtf is None: continue
-            nonempty=[r for r in parse_rtf(rtf, keep_empty=True).runs if r.text.strip()]
-            lines=_runs_to_lines(nonempty)
-            if len(lines)<=1: continue
-            nruns=len(nonempty)
-            pn=el.find('RVRect3D[@rvXMLIvarName="position"]')
-            hnums=re.findall(r"[-\d.]+", pn.text) if pn is not None else []
-            h=int(float(hnums[4])) if len(hnums)>=5 else 0
-            step=max(1, round(h/len(lines))) if h>0 else 60
-            template=copy.deepcopy(el)
-            for i,(ltext,owner) in enumerate(lines):
-                new_texts=[""]*nruns; new_texts[owner]=ltext
-                new_rtf=_rewrite_rtf_runs(rtf, new_texts)
-                if new_rtf is None: continue
-                if i==0:
-                    target=el
-                else:
-                    target=copy.deepcopy(template)
-                    target.set("UUID", str(uuid.uuid4()).upper())
-                _encode_rtf(_rtf_node(target), new_rtf)
-                if i>0:
-                    tp=target.find('RVRect3D[@rvXMLIvarName="position"]')
-                    if tp is not None: _shift_pos_y(tp, i*step)
-                    elems.insert(list(elems).index(el)+i, target)
-                    n_new+=1
-    return _xml_to_bytes(root,orig), n_new
-
-
-def _split_slide_lines(xml_bytes: bytes) -> tuple:
-    """在文字圖層的換行處拆成獨立投影片：每張投影片＝原各文字層的第 i 行
-    （各層的行依序對齊，雙語 zh/en 會同頁配對；行數較少的層在後面的頁省略）。
-    各層保留原位置（不下移）。回傳 (new_bytes, n_new_slides) —— 淨增加的張數。"""
-    root, orig = _load_root(xml_bytes)
-    n_new=0
-    gnode=root.find('.//array[@rvXMLIvarName="groups"]')
-    for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
-        snode=g.find('array[@rvXMLIvarName="slides"]')
-        if snode is None: continue
-        for sl in list(snode):
-            elems=sl.find('array[@rvXMLIvarName="displayElements"]')
-            if elems is None: continue
-            # 逐文字層算出各自的行；非文字層 / 無 RTF 層原樣帶到每張
-            per_layer=[]   # 與 elems 中 RVTextElement 同序：(lines, rtf, nruns)
-            maxlines=0
-            for el in elems:
-                if el.tag!="RVTextElement": continue
-                rtf=_decode_rtf(_rtf_node(el))
-                if rtf is None:
-                    per_layer.append(([], None, 0)); continue
-                nonempty=[r for r in parse_rtf(rtf, keep_empty=True).runs if r.text.strip()]
-                lines=_runs_to_lines(nonempty)
-                per_layer.append((lines, rtf, len(nonempty)))
-                maxlines=max(maxlines, len(lines))
-            if maxlines<=1: continue            # 沒有可拆的多行層
-            idx=list(snode).index(sl)
-            for i in range(maxlines):
-                ns=copy.deepcopy(sl)
-                for e in ns.iter():            # 重給所有 UUID，避免跨頁重複
-                    if "UUID" in e.attrib: e.set("UUID", str(uuid.uuid4()).upper())
-                ns_elems=ns.find('array[@rvXMLIvarName="displayElements"]')
-                ns_text=[e for e in ns_elems if e.tag=="RVTextElement"]
-                for (lines,rtf,nruns),nsel in zip(per_layer, ns_text):
-                    if rtf is None: continue                  # 無 RTF：原樣保留
-                    if i < len(lines):
-                        ltext,owner=lines[i]
-                        new_texts=[""]*nruns; new_texts[owner]=ltext
-                        new_rtf=_rewrite_rtf_runs(rtf, new_texts)
-                        if new_rtf is not None: _encode_rtf(_rtf_node(nsel), new_rtf)
-                    else:
-                        ns_elems.remove(nsel)                  # 此層行數較少 → 這張沒有它
-                snode.insert(idx+i, ns)
-            snode.remove(sl)
-            n_new+=maxlines-1
-    return _xml_to_bytes(root,orig), n_new
-
-
-def _split_layers_to_slides(xml_bytes: bytes) -> tuple:
-    """把一張投影片裡的多個文字圖層，各自拆成獨立投影片（每張保留背景等非文字圖層
-    ＋一個文字圖層，並把該文字圖層改為全幅 1920×1080 置中）。只有一個文字圖層的
-    投影片不動。回傳 (new_bytes, n_new_slides)。"""
-    root, orig = _load_root(xml_bytes)
-    n_new=0
-    gnode=root.find('.//array[@rvXMLIvarName="groups"]')
-    for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
-        snode=g.find('array[@rvXMLIvarName="slides"]')
-        if snode is None: continue
-        for sl in list(snode):
-            de=sl.find('array[@rvXMLIvarName="displayElements"]')
-            if de is None: continue
-            m=sum(1 for e in de if e.tag=="RVTextElement")
-            if m<=1: continue
-            idx=list(snode).index(sl)
-            for i in range(m):
-                ns=copy.deepcopy(sl)
-                for e in ns.iter():                       # 重給所有 UUID
-                    if "UUID" in e.attrib: e.set("UUID", str(uuid.uuid4()).upper())
-                nde=ns.find('array[@rvXMLIvarName="displayElements"]')
-                ti=0
-                for te in [e for e in nde if e.tag=="RVTextElement"]:
-                    if ti==i:                             # 保留第 i 個文字層 → 全幅置中
-                        pn=te.find('RVRect3D[@rvXMLIvarName="position"]')
-                        if pn is not None: pn.text="{0 0 0 1920 1080}"
-                        te.set("verticalAlignment","1")
-                    else:
-                        nde.remove(te)                    # 移除其餘文字層
-                    ti+=1
-                snode.insert(idx+i, ns)
-            snode.remove(sl)
-            n_new+=m-1
-    return _xml_to_bytes(root,orig), n_new
-
-
 def _set_el_text(el, new_plain: str) -> bool:
     """把單一文字元素的內文換成 new_plain（單一樣式＝原第一段的字體/字級/顏色），
     保留 RTF header 與第一段樣式控制字。改動回傳 True。"""
@@ -1037,14 +856,6 @@ def _keep_first_layers(xml_bytes: bytes, keep: int) -> tuple:
         if len(kids)<=keep: continue
         for ch in kids[keep:]: elems.remove(ch)
         n+=1
-    return _xml_to_bytes(root,orig), n
-
-def _del_last_layer(xml_bytes: bytes) -> tuple:
-    """刪除每張投影片的最後一個圖層。回傳 (new_bytes, n_slides_changed)。"""
-    root, orig = _load_root(xml_bytes); n=0
-    for sl, elems in _iter_slides(root):
-        if elems is None or len(elems)==0: continue
-        elems.remove(list(elems)[-1]); n+=1
     return _xml_to_bytes(root,orig), n
 
 def _merge_runs_plain(runs) -> str:
@@ -1097,25 +908,6 @@ def _dedup_uuids(xml_bytes: bytes) -> tuple:
             el.set("UUID", nu); seen.add(nu); n+=1
         else:
             seen.add(u)
-    return _xml_to_bytes(root,orig), n
-
-def _add_layer_all(xml_bytes: bytes, text: str="-") -> tuple:
-    """為每張投影片新增一個文字圖層（預設文字 text）。以文件中既有文字圖層為範本複製，
-    各自給新 UUID。回傳 (new_bytes, n_added)。"""
-    root, orig = _load_root(xml_bytes)
-    template=None
-    for el in root.iter("RVTextElement"):
-        if _rtf_node(el) is not None: template=el; break
-    if template is None: return xml_bytes, 0
-    template=copy.deepcopy(template)
-    _set_el_text(template, text)
-    n=0
-    for sl, elems in _iter_slides(root):
-        if elems is None:
-            elems=ET.SubElement(sl, "array"); elems.set("rvXMLIvarName","displayElements")
-        new_el=copy.deepcopy(template)
-        new_el.set("UUID", str(uuid.uuid4()).upper())
-        elems.append(new_el); n+=1
     return _xml_to_bytes(root,orig), n
 
 def _apply_pinyin(xml_bytes: bytes, mi_to_ni: bool=True, keep_breaks: bool=False) -> tuple:
@@ -1809,12 +1601,9 @@ with tab_tpl:
         st.info("尚未定義任何模板。請在程式碼 §TEMPLATES 區塊新增。")
     else:
         _TPL_CAT={
-            "prune_empty":"統整","tidy":"統整","prune_slides":"統整",
-            "keep_first2":"統整","del_last":"統整",
+            "tidy":"統整","prune_slides":"統整","keep_first2":"統整",
             "tc2sc":"轉換","pinyin":"轉換",
-            "reverse_layers":"操作",
-            "split_lines":"操作","layers_to_slides":"操作","add_layer":"操作",
-            "merge_runs":"操作",
+            "reverse_layers":"操作","merge_runs":"操作",
         }
         def _tpl_cat(t):
             return t.get("cat") or (_TPL_CAT.get(t.get("action"),"其他")
@@ -1861,9 +1650,7 @@ with tab_tpl:
                              use_container_width=True, type="primary"):
                     src=st.session_state["xml_content"]
                     try:
-                        if action=="prune_empty":
-                            nb,n=_prune_empty_layers(src); _commit(nb,n,f"已刪除 {n} 個空圖層")
-                        elif action=="reverse_layers":
+                        if action=="reverse_layers":
                             nb,n=_reverse_layers(src); _commit(nb,n,f"已顛倒 {n} 張的圖層順序")
                         elif action=="tidy":
                             _dn=st.session_state.get(f"dropnl_{ti}", False)
@@ -1872,20 +1659,10 @@ with tab_tpl:
                         elif action=="prune_slides":
                             nb,n=_delete_empty_slides(src, st.session_state.get(f"keepbg_{ti}", True))
                             _commit(nb,n,f"已刪除 {n} 張無圖層的投影片")
-                        elif action=="split_lines":
-                            nb,n=_split_layer_lines(src); _commit(nb,n,f"已拆出 {n} 個新圖層")
-                        elif action=="layers_to_slides":
-                            nb,n=_split_layers_to_slides(src); _commit(nb,n,f"已把圖層拆成 {n} 張新投影片")
                         elif action=="keep_first2":
                             nb,n=_keep_first_layers(src, 2); _commit(nb,n,f"已處理 {n} 張（只保留前兩個圖層）")
-                        elif action=="del_last":
-                            nb,n=_del_last_layer(src); _commit(nb,n,f"已刪除 {n} 張的最後一個圖層")
                         elif action=="merge_runs":
                             nb,n=_merge_layer_runs(src); _commit(nb,n,f"已合併 {n} 個圖層的段落")
-                        elif action=="add_layer":
-                            nb,n=_add_layer_all(src)
-                            _commit(nb,n,f"已為 {n} 張投影片各加一個圖層" if n
-                                    else "找不到可作範本的文字圖層")
                         elif action=="tc2sc":
                             rev=st.session_state.get(f"rev_{ti}", False)
                             nb,n,errs=_apply_tc2sc(src, rev)

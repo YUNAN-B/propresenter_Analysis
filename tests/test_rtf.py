@@ -72,11 +72,6 @@ def test_display_compose_roundtrip(app):
     assert real == [r.text for r in runs]                  # 補回後完全還原
 
 
-def test_runs_to_lines(app):
-    lines = app._runs_to_lines([R("《\n"), R("shout\n"), R("》")])
-    assert [t for t, _ in lines] == ["《", "shout", "》"]
-
-
 # ── 小工具 ──────────────────────────────────────────────────────
 def test_rgba_hex(app):
     assert app._rgba_hex("1 1 1 1") == "#FFFFFF"

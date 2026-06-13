@@ -20,13 +20,6 @@ def _layers(app, b):
 
 
 # ── 統整 ────────────────────────────────────────────────────────
-def test_prune_empty_layers(app, sample):
-    nb, n = app._prune_empty_layers(sample)
-    assert n == 2 and _ok(nb)                     # s3 的空圖層 + placeholder
-    # s3 應再無文字圖層
-    s3 = [tl for num, lab, tl in _layers(app, nb) if lab == "empties"][0]
-    assert s3 == []
-
 def test_prune_slides(app, sample):
     nb, n = app._delete_empty_slides(sample, keep_bg=True)
     assert n == 1 and _ok(nb)                     # s4 無圖層
@@ -77,16 +70,6 @@ def test_reverse_layers(app, sample):
     assert n >= 1 and _ok(nb)
     # 文字順序前後顛倒
     assert [t for _, _, t, _ in before] == list(reversed([t for _, _, t, _ in after]))
-
-def test_split_layer_lines(app, sample):
-    nb, n = app._split_layer_lines(sample)
-    assert n >= 1 and _ok(nb)
-    s1 = [tl for num, lab, tl in _layers(app, nb) if lab == "bilingual"][0]
-    texts = [t for _, _, t, _ in s1]
-    assert "讚美主" in texts and "哈利路亞" in texts   # 兩行各成一層
-    # 後拆出的那層 y 較大（略低）
-    ys = {t: y for _, y, t, _ in s1}
-    assert ys["哈利路亞"] > ys["讚美主"]
 
 def test_apply_style(app):
     assert len(app._STYLES) >= 1                      # styles.json 有載入
@@ -169,43 +152,6 @@ def test_build_pro6_single_blank_paging(app):
     assert _ok(nb)
     rows = _layers(app, nb)
     assert len(rows) == 2 and rows[0][2][0][2] == "行一\n行二"  # 空行分頁、段內換行保留
-
-def test_split_layers_to_slides(app):
-    # 創造出「1 張、多個單行圖層」（無空行、換行換圖層）→ 應能拆成多張
-    doc = app._build_pro6_structured("標題\n第一句\n第二句\n第三句", "空行", "換行")
-    assert len(_layers(app, doc)) == 1                  # 先是 1 張
-    nb, n = app._split_layers_to_slides(doc)
-    assert n == 3 and _ok(nb)                           # 4 層 → 4 張（+3）
-    rows = _layers(app, nb)
-    assert len(rows) == 4
-    for _, _, tl in rows:
-        assert len(tl) == 1                             # 每張只剩一個文字層
-        assert tl[0][1] == 0                            # y=0（全幅置中）
-
-def test_split_slide_lines(app, sample):
-    before = _layers(app, sample)
-    n_before = len(before)
-    nb, n = app._split_slide_lines(sample)
-    assert n >= 1 and _ok(nb)
-    after = _layers(app, nb)
-    assert len(after) > n_before                       # 投影片變多
-    # 雙語頁（zh 2 行 + en 1 行）→ 第一張同時有 zh 行0 與 en 行0，第二張只有 zh 行1
-    texts = [t for _, _, tl in after for _, _, t, _ in tl]
-    assert "讚美主" in texts and "哈利路亞" in texts
-    # 「讚美主」與「哈利路亞」應落在不同投影片
-    s_of = {}
-    for num, lab, tl in after:
-        for _, _, t, _ in tl:
-            s_of.setdefault(t, num)
-    assert s_of.get("讚美主") != s_of.get("哈利路亞")
-
-def test_add_layer_all(app, sample):
-    before = sum(len(tl) for _, _, tl in _layers(app, sample))
-    nb, n = app._add_layer_all(sample)
-    assert n == 7 and _ok(nb)                          # 7 張各加一層
-    allt = [t for _, _, tl in _layers(app, nb) for _, _, t, _ in tl]
-    assert allt.count("-") == 7
-
 
 # ── 撰寫頁：段落類型（group）與熱鍵 ────────────────────────────────
 def _groups(app, b):
