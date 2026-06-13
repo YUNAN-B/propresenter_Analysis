@@ -1556,8 +1556,24 @@ def _push_undo():
     us.append(st.session_state["xml_content"])
     if len(us)>50: del us[:len(us)-50]
 
+def _soft_reset():
+    """卡住時的自救：清全域快取 + 所有暫態旗標，把檔案還原到剛載入的狀態。"""
+    try: st.cache_data.clear()
+    except Exception: pass
+    ss=st.session_state
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","_"))]:
+        ss.pop(k, None)                          # 清掉輸入框快取與所有 _xxx 暫態旗標
+    if ss.get("xml_original") is not None:
+        ss["xml_content"]=ss["xml_original"]; ss["undo_stack"]=[]; ss["history"]=[]
+    st.rerun()
+
 def _commit_change(tpl_name, nb, cnt, msg):
     """套用變更：存檔、記錄歷史、清掉撰寫頁快取、設定 toast，然後重跑。"""
+    try:                                         # 防呆：只存「能解析的合法 XML」，壞檔不入狀態
+        ET.fromstring(nb.decode("utf-8"))
+    except Exception:
+        st.session_state["_tpl_msg"]=f"⚠️「{tpl_name}」結果異常，已略過（檔案未變動）"
+        st.rerun(); return                        # return 為保險（rerun 通常已中斷）
     _push_undo()
     st.session_state["xml_content"]=nb
     st.session_state["history"].append(f"{tpl_name}({cnt})")
@@ -1706,7 +1722,13 @@ if "xml_content" not in st.session_state:
     st.stop()
 
 xml_bytes=st.session_state["xml_content"]
-doc_meta, _summary_groups=_doc_summary(xml_bytes)
+try:                                             # 保險絲：檔案若解析不了就不要整頁崩，給自救鈕
+    doc_meta, _summary_groups=_doc_summary(xml_bytes)
+except Exception:
+    st.error("⚠️ 目前檔案無法解析，狀態可能異常。")
+    if st.button("🔄 重設（清快取與狀態、還原到剛載入的檔）", type="primary"):
+        _soft_reset()
+    st.stop()
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
@@ -1738,6 +1760,11 @@ with st.sidebar:
     if _n_uuid: st.caption(f"匯出將修復 {_n_uuid} 個重複 UUID")
     st.download_button(f"匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
                        "application/xml", use_container_width=True)
+    st.divider()
+    # 卡住自救：清全域快取＋暫態旗標、還原到剛載入的檔（不丟掉已上傳的檔）
+    if st.button("🔄 卡住了？重設", use_container_width=True,
+                 help="清除快取與暫存狀態、把檔案還原到剛載入時。操作後若怪怪的、重新整理也沒用時點這個。"):
+        _soft_reset()
 
 # ── 操作後的飄出提示（toast 會被 rerun 清掉，故存到 session_state 於下一輪顯示）──
 if st.session_state.get("_tpl_msg"):
@@ -1873,8 +1900,8 @@ with tab_tpl:
                                     st.error("拼音引擎不可用：請 pip install pypinyin。")
                                 else:
                                     _commit(nb,n,f"已把 {n} 張的拼音寫入第二層（引擎：{engine}）")
-                    except RuntimeError as e:
-                        st.error(f"{e}")
+                    except Exception as e:
+                        st.error(f"套用時發生問題：{e}（檔案未變動，可改用側邊欄「🔄 卡住了？重設」）")
 
 
 # ─── TAB 3: 撰寫（逐段編輯明文，失焦自動儲存）─────────────────
