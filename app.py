@@ -711,9 +711,9 @@ TEMPLATES: list[dict] = [
     {"name": "反轉圖層順序",
      "desc": "把圖層順序鏡像顛倒",
      "action": "reverse_layers"},
-    {"name": "只保留前兩個圖層",
-     "desc": "每張投影片只留前兩個圖層，後面的都刪掉",
-     "action": "keep_first2"},
+    {"name": "只保留前幾個圖層",
+     "desc": "每張投影片只留前 N 個圖層（N 可輸入），後面的都刪掉",
+     "action": "keep_first"},
     {"name": "合併圖層段落",
      "desc": "把同一個圖層裡不同的段落合併",
      "action": "merge_runs"},
@@ -1601,7 +1601,7 @@ with tab_tpl:
         st.info("尚未定義任何模板。請在程式碼 §TEMPLATES 區塊新增。")
     else:
         _TPL_CAT={
-            "tidy":"統整","prune_slides":"統整","keep_first2":"統整",
+            "tidy":"統整","prune_slides":"統整","keep_first":"統整",
             "tc2sc":"轉換","pinyin":"轉換",
             "reverse_layers":"操作","merge_runs":"操作",
         }
@@ -1638,6 +1638,9 @@ with tab_tpl:
                 elif action=="tidy":
                     st.checkbox("連單換行都刪（接成一行、補空格；空行段落保留）",
                                 value=False, key=f"dropnl_{ti}")
+                elif action=="keep_first":
+                    st.number_input("保留前幾個圖層", min_value=1, max_value=50,
+                                    value=2, step=1, key=f"keepn_{ti}")
 
                 def _commit(nb, cnt, msg):
                     _commit_change(tpl["name"], nb, cnt, msg)
@@ -1659,8 +1662,10 @@ with tab_tpl:
                         elif action=="prune_slides":
                             nb,n=_delete_empty_slides(src, st.session_state.get(f"keepbg_{ti}", True))
                             _commit(nb,n,f"已刪除 {n} 張無圖層的投影片")
-                        elif action=="keep_first2":
-                            nb,n=_keep_first_layers(src, 2); _commit(nb,n,f"已處理 {n} 張（只保留前兩個圖層）")
+                        elif action=="keep_first":
+                            keep=int(st.session_state.get(f"keepn_{ti}", 2))
+                            nb,n=_keep_first_layers(src, keep)
+                            _commit(nb,n,f"已處理 {n} 張（只保留前 {keep} 個圖層）")
                         elif action=="merge_runs":
                             nb,n=_merge_layer_runs(src); _commit(nb,n,f"已合併 {n} 個圖層的段落")
                         elif action=="tc2sc":
