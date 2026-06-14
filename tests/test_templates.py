@@ -243,3 +243,22 @@ def test_load_new_doc_fk_uses_original_size(app):
     app._load_new_doc(raw, "song.pro6")
     assert app.st.session_state["_fk"] == ("song.pro6", len(raw))   # 用原始長度
     assert app.st.session_state["xml_content"] == app._normalize_preset_groups(raw)
+
+def test_merge_double_rows(app):
+    # 例①：6 張單層 → 3 張，每層兩行（前上、後下）
+    b = app._build_pro6_structured("\n\n".join(f"句{i}" for i in "一二三四五六"), "空行", "空行")
+    nb, n = app._merge_double_rows(b)
+    assert n == 3 and _ok(nb)
+    texts = ["".join(t for _, _, t, _ in tl) for _, _, tl in _layers(app, nb)]
+    assert texts == ["句一\n句二", "句三\n句四", "句五\n句六"]
+    # 例②：圖層數 2,3 → 合併成 3 層，最後一層只有一行
+    b2 = app._build_pro6_structured("行1\n行2\n\n行A\n行B\n行C", "空行", "換行")
+    nb2, n2 = app._merge_double_rows(b2)
+    rows = _layers(app, nb2)
+    assert len(rows) == 1 and n2 == 1
+    layer_texts = [t for _, _, t, _ in rows[0][2]]
+    assert layer_texts == ["行1\n行A", "行2\n行B", "行C"]      # 圖層數取多、末層單行
+    # 奇數最後一張保留
+    b3 = app._build_pro6_structured("a\n\nb\n\nc", "空行", "空行")
+    nb3, n3 = app._merge_double_rows(b3)
+    assert n3 == 1 and len(_layers(app, nb3)) == 2            # (a+b) 合併、c 留原樣

@@ -36,6 +36,7 @@ ProParse · 投影片解析 · Streamlit App
 """
 
 import base64
+import copy
 import json
 import os
 import re
@@ -718,6 +719,9 @@ TEMPLATES: list[dict] = [
     {"name": "合併圖層段落",
      "desc": "把同一個圖層裡不同的段落合併",
      "action": "merge_runs"},
+    {"name": "合併雙排",
+     "desc": "投影片兩兩合併成上下兩行（前張在上、後張在下，逐圖層；圖層數取多），張數約減半",
+     "action": "merge_rows"},
 ]
 
 
@@ -751,20 +755,20 @@ def _boundary_nl(runs) -> list:
     return res
 
 def _run_display_texts(runs) -> list:
-    """撰寫框顯示用：隱藏段間換行，內部換行以字面 \\n 呈現。"""
+    """撰寫框顯示用：隱藏段間換行；段內換行直接以真實換行呈現（多行輸入框）。"""
     owner=_boundary_nl(runs); n=len(runs); out=[]
     for i in range(n):
         t=runs[i].text
         if i>0   and owner[i-1]=="next": t=t[1:]    # 去掉段首邊界換行
         if i<n-1 and owner[i]  =="prev": t=t[:-1]   # 去掉段尾邊界換行
-        out.append(t.replace("\n","\\n"))
+        out.append(t)
     return out
 
 def _compose_from_display(runs, display: list) -> list:
-    """撰寫框存檔用：把隱藏的段間換行補回到原本歸屬的一側。"""
+    """撰寫框存檔用：把隱藏的段間換行補回到原本歸屬的一側（輸入已是真實換行）。"""
     owner=_boundary_nl(runs); n=len(runs); out=[]
     for i in range(n):
-        real=display[i].replace("\\n","\n")
+        real=display[i]
         if i>0   and owner[i-1]=="next": real="\n"+real
         if i<n-1 and owner[i]  =="prev": real=real+"\n"
         out.append(real)
@@ -887,6 +891,43 @@ def _merge_layer_runs(xml_bytes: bytes) -> tuple:
             if sum(1 for r in allruns if r.text.strip())<=1: continue  # 單段（或更少）不動
             if _set_el_text(el, _merge_runs_plain(allruns)): n+=1      # 以首段樣式重寫整層
     return _xml_to_bytes(root,orig), n
+
+def _merge_pair_into_first(A, B):
+    """把 B 投影片併入 A：逐「文字圖層」(同 index) 把 B 的文字接到 A 之下（A 上行、B 下行），
+    用 A 的樣式與位置（往下擠）；只有 B 有的圖層則整層複製進 A（只有一行）。"""
+    a_de=A.find('array[@rvXMLIvarName="displayElements"]')
+    b_de=B.find('array[@rvXMLIvarName="displayElements"]')
+    a_text=[e for e in (a_de if a_de is not None else []) if e.tag=="RVTextElement"]
+    b_text=[e for e in (b_de if b_de is not None else []) if e.tag=="RVTextElement"]
+    for i in range(max(len(a_text), len(b_text))):
+        if i<len(a_text) and i<len(b_text):              # 兩邊都有 → A 上、B 下，用 A 的樣式
+            _set_el_text(a_text[i], _el_plain(a_text[i])+"\n"+_el_plain(b_text[i]))
+        elif i>=len(a_text):                             # 只有 B 有 → 整層複製進 A（單行）
+            if a_de is None:
+                a_de=ET.SubElement(A, "array"); a_de.set("rvXMLIvarName","displayElements")
+            nb=copy.deepcopy(b_text[i]); nb.set("UUID", _new_uuid()); a_de.append(nb)
+        # 只有 A 有的圖層 → 不動（維持單行）
+
+def _merge_double_rows(xml_bytes: bytes) -> tuple:
+    """把投影片依文件順序兩兩配對合併成「上下雙排」：前張在上行、後張在下行（逐圖層、
+    同 index；圖層數取多），合併後用前張的樣式與位置。張數約除二，奇數最後一張保留原樣。
+    回傳 (new_bytes, n_pairs)。"""
+    root, orig = _load_root(xml_bytes)
+    gnode=root.find('.//array[@rvXMLIvarName="groups"]')
+    seq=[]   # (slides_array, slide_element) 依文件順序
+    for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
+        sarr=g.find('array[@rvXMLIvarName="slides"]')
+        for sl in (list(sarr) if sarr is not None else []):
+            seq.append((sarr, sl))
+    n=0
+    for k in range(0, len(seq)-1, 2):                    # (0,1)(2,3)… 落單的最後一張不處理
+        (_, A), (b_arr, B) = seq[k], seq[k+1]
+        _merge_pair_into_first(A, B)
+        b_arr.remove(B); n+=1
+    for g in list(gnode.findall("RVSlideGrouping") if gnode is not None else []):
+        sarr=g.find('array[@rvXMLIvarName="slides"]')    # 移除因此變空的群組
+        if sarr is not None and len(list(sarr))==0: gnode.remove(g)
+    return _xml_to_bytes(root, orig), n
 
 def _apply_tc2sc(xml_bytes: bytes, reverse: bool=False) -> tuple:
     """全文繁↔簡。reverse=False 繁→簡；True 簡→繁。回傳 (new_bytes, n_nodes, errs)。"""
@@ -1604,7 +1645,7 @@ with tab_tpl:
         _TPL_CAT={
             "tidy":"統整","prune_slides":"統整","keep_first":"統整",
             "tc2sc":"轉換","pinyin":"轉換",
-            "reverse_layers":"操作","merge_runs":"操作",
+            "reverse_layers":"操作","merge_runs":"操作","merge_rows":"操作",
         }
         def _tpl_cat(t):
             return t.get("cat") or (_TPL_CAT.get(t.get("action"),"其他")
@@ -1669,6 +1710,8 @@ with tab_tpl:
                             _commit(nb,n,f"已處理 {n} 張（只保留前 {keep} 個圖層）")
                         elif action=="merge_runs":
                             nb,n=_merge_layer_runs(src); _commit(nb,n,f"已合併 {n} 個圖層的段落")
+                        elif action=="merge_rows":
+                            nb,n=_merge_double_rows(src); _commit(nb,n,f"已兩兩合併 {n} 組（上下雙排）")
                         elif action=="tc2sc":
                             rev=st.session_state.get(f"rev_{ti}", False)
                             nb,n,errs=_apply_tc2sc(src, rev)
@@ -1735,7 +1778,7 @@ def _write_tab():
 
     def _save_empty_layer(gi, si, li, key):
         """空圖層的單一空輸入框：打字後以單一樣式寫回該層；仍空則不動。"""
-        text=st.session_state.get(key,"").replace("\\n","\n")
+        text=st.session_state.get(key,"")
         if not text.strip(): return
         xml=st.session_state["xml_content"]
         nb,err=_set_layer_text(xml, gi, si, li, text)
@@ -1812,10 +1855,10 @@ def _write_tab():
                         unsafe_allow_html=True)
                     ekey=f"empty_{gi}_{si_orig}_{layer['idx']}"
                     if ekey not in st.session_state: st.session_state[ekey]=""
-                    st.text_input(f"empty L{layer['idx']}", key=ekey,
-                                  label_visibility="collapsed",
-                                  on_change=_save_empty_layer,
-                                  args=(gi, si_orig, layer["idx"], ekey))
+                    st.text_area(f"empty L{layer['idx']}", key=ekey, height=68,
+                                 label_visibility="collapsed",
+                                 on_change=_save_empty_layer,
+                                 args=(gi, si_orig, layer["idx"], ekey))
                     continue
                 p=layer["pos"]
                 # 上：圖層位置資訊
@@ -1845,11 +1888,12 @@ def _write_tab():
                             f'{("　"+"・".join(styles)) if styles else ""}</div>',
                             unsafe_allow_html=True)
                     with ct:
-                        # 下：輸入修改框
-                        st.text_input(f"R{ri}", key=k,
-                                      label_visibility="collapsed",
-                                      on_change=_save_text_layer,
-                                      args=(gi, si_orig, layer["idx"], run_keys))
+                        # 下：多行輸入修改框（高度隨行數，段內可直接按 Enter 換行）
+                        _h=max(68, min(220, 26*(disp[ri].count("\n")+1)+16))
+                        st.text_area(f"R{ri}", key=k, height=_h,
+                                     label_visibility="collapsed",
+                                     on_change=_save_text_layer,
+                                     args=(gi, si_orig, layer["idx"], run_keys))
                     # 段落之間留間距，讓不同段更分明
                     if ri < len(layer["runs"])-1:
                         st.markdown("<div style='height:.5rem'></div>",
@@ -1859,7 +1903,7 @@ def _write_tab():
 
 
 with tab_text:
-    st.caption("單行輸入，段內換行請打 \\n。各段保留原字體/字級/顏色；段與段之間的換行會自動處理、不顯示。"
+    st.caption("多行輸入，段內換行直接按 Enter。各段保留原字體/字級/顏色；段與段之間的換行會自動處理、不顯示。"
                "清空某段並失焦即刪除該段。（繁→簡、拼音在「模板」分頁）")
     if st.session_state.get("_del_ask") is not None:     # 刪除投影片確認框
         _del_slide_dialog(st.session_state["_del_ask"])
