@@ -737,44 +737,6 @@ def _iter_slides(root):
         for sl in (snode if snode is not None else []):
             yield sl, sl.find('array[@rvXMLIvarName="displayElements"]')
 
-def _layer_runs(xml_bytes: bytes, gi, si, li) -> list:
-    """取得某圖層的非空 runs（與顯示用的 layer['runs'] 一致）。"""
-    _,_,el=_get_layer_el(xml_bytes,gi,si,li)
-    rtf=_decode_rtf(_rtf_node(el))
-    if rtf is None: return []
-    return [r for r in parse_rtf(rtf, keep_empty=True).runs if r.text.strip()]
-
-def _boundary_nl(runs) -> list:
-    """每個相鄰段交界 (i,i+1) 的換行歸屬：'prev'=在前段尾、'next'=在後段首、
-    None=該交界無換行（同行內換樣式，不隱藏以免改壞）。"""
-    res=[]
-    for i in range(len(runs)-1):
-        if   runs[i].text.endswith("\n"):     res.append("prev")
-        elif runs[i+1].text.startswith("\n"): res.append("next")
-        else:                                 res.append(None)
-    return res
-
-def _run_display_texts(runs) -> list:
-    """撰寫框顯示用：隱藏段間換行；段內換行直接以真實換行呈現（多行輸入框）。"""
-    owner=_boundary_nl(runs); n=len(runs); out=[]
-    for i in range(n):
-        t=runs[i].text
-        if i>0   and owner[i-1]=="next": t=t[1:]    # 去掉段首邊界換行
-        if i<n-1 and owner[i]  =="prev": t=t[:-1]   # 去掉段尾邊界換行
-        out.append(t)
-    return out
-
-def _compose_from_display(runs, display: list) -> list:
-    """撰寫框存檔用：把隱藏的段間換行補回到原本歸屬的一側（輸入已是真實換行）。"""
-    owner=_boundary_nl(runs); n=len(runs); out=[]
-    for i in range(n):
-        real=display[i]
-        if i>0   and owner[i-1]=="next": real="\n"+real
-        if i<n-1 and owner[i]  =="prev": real=real+"\n"
-        out.append(real)
-    return out
-
-
 def _rewrite_rtf_runs(rtf: str, real_texts: list):
     """以「每個非空 run 的新文字（已是真實文字，"" 表示刪該段）」改寫 rtf 正文，
     保留 header 與所有控制字。回傳新 rtf；段數不符回傳 None；無變動回傳原 rtf。"""
@@ -825,8 +787,9 @@ def _set_el_text(el, new_plain: str) -> bool:
     if spans:
         start=spans[0][0]; end=spans[-1][1]
         new_rtf=rtf[:start]+enc+rtf[end:]
-    else:                                  # 原本無內文：附加在正文末（} 之前）
-        he,be=_body_bounds(rtf)
+    else:                                  # 原本無內文
+        if not new_plain: return False     # 空層 + 空字 → 不動（避免存出多餘空格）
+        he,be=_body_bounds(rtf)            # 附加在正文末（} 之前）
         sep="" if (be>he and rtf[be-1] in " \n") else " "
         new_rtf=rtf[:be]+sep+enc+rtf[be:]
     if new_rtf==rtf: return False
@@ -1739,17 +1702,12 @@ def _write_tab():
     xml=st.session_state["xml_content"]
     _dm, groups=_parse_xml(xml)
 
-    # 各投影片圖層數 / 段落數一覽（一字一張，隨內容即時更新，方便快速掃描異常）
+    # 各投影片圖層數一覽（一字一張，隨內容即時更新，方便快速掃描異常）
     _slides_flat = [s for g in groups for s in g["slides"]]
     _layer_counts = "".join(str(len(s["layers"])) for s in _slides_flat)
-    _para_counts = "".join(
-        str(sum(len(l["runs"]) for l in s["layers"] if l["type"]=="RVTextElement"))
-        for s in _slides_flat)
-    _row = ('font-family:monospace;font-size:.9rem;color:#999;'
-            'letter-spacing:2px;word-break:break-all')
     st.markdown(
-        f'<div style="{_row};margin:.2rem 0 0">圖層數：{_layer_counts}</div>'
-        f'<div style="{_row};margin:0 0 .6rem">段落數：{_para_counts}</div>',
+        '<div style="font-family:monospace;font-size:.9rem;color:#999;letter-spacing:2px;'
+        f'word-break:break-all;margin:.2rem 0 .6rem">圖層數：{_layer_counts}</div>',
         unsafe_allow_html=True)
     st.markdown("---")
 
@@ -1758,33 +1716,13 @@ def _write_tab():
     if st.session_state.get("_hk_msg"):
         st.info(st.session_state.pop("_hk_msg"), icon="⌨️")
 
-    def _save_text_layer(gi, si, li, run_keys):
-        """單行輸入框失焦自動儲存：把顯示文字補回段間換行後寫入。"""
-        display=[st.session_state.get(k,"") for k in run_keys]
-        xml=st.session_state["xml_content"]
-        runs=_layer_runs(xml, gi, si, li)
-        if len(runs)!=len(display):
-            st.session_state["_text_err"]="段數不符，請重新整理頁面"; return
-        real=_compose_from_display(runs, display)
-        nb,err=_apply_text_runs(xml, gi, si, li, real)
-        if err:
-            st.session_state["_text_err"]=err; return
-        if nb is xml:
-            return                                   # 無變動
-        _push_undo()
-        st.session_state["xml_content"]=nb
-        for k in run_keys: st.session_state.pop(k,None)
-        st.session_state["history"].append(f"文字G{gi}S{si}L{li}")
-
-    def _save_empty_layer(gi, si, li, key):
-        """空圖層的單一空輸入框：打字後以單一樣式寫回該層；仍空則不動。"""
+    def _save_layer_text(gi, si, li, key):
+        """整層編輯失焦自動儲存：把整層文字以「首字（第一段）的字體/字級/顏色」寫回。"""
         text=st.session_state.get(key,"")
-        if not text.strip(): return
         xml=st.session_state["xml_content"]
         nb,err=_set_layer_text(xml, gi, si, li, text)
-        if err:
-            st.session_state["_text_err"]=err; return
-        if nb is xml: return
+        if err: st.session_state["_text_err"]=err; return
+        if nb is xml: return                         # 無變動
         _push_undo()
         st.session_state["xml_content"]=nb
         st.session_state.pop(key, None)
@@ -1847,64 +1785,36 @@ def _write_tab():
                 if st.button("🗑", key=f"delbtn_{num}", help="刪除這張投影片"):
                     st.session_state["_del_ask"]=num; st.rerun()
             for layer in [l for l in slide["layers"] if l["type"]=="RVTextElement"]:
-                if not layer["runs"]:
-                    # 空圖層：標注 + 留一個可編輯空框（打字即填回該層）
-                    st.markdown(
-                        f'<div style="color:#c0392b;font-size:.74rem;margin:.4rem 0 0">'
-                        f'圖層 L{layer["idx"]} 空圖層（[empty]，可在下方直接輸入）</div>',
-                        unsafe_allow_html=True)
-                    ekey=f"empty_{gi}_{si_orig}_{layer['idx']}"
-                    if ekey not in st.session_state: st.session_state[ekey]=""
-                    st.text_area(f"empty L{layer['idx']}", key=ekey, height=68,
-                                 label_visibility="collapsed",
-                                 on_change=_save_empty_layer,
-                                 args=(gi, si_orig, layer["idx"], ekey))
-                    continue
-                p=layer["pos"]
-                # 上：圖層位置資訊
+                p=layer["pos"]; runs=layer["runs"]
+                if runs:                                  # 首字（第一段）樣式提示
+                    r0=runs[0]
+                    sz=f"{r0.font_size_pt:g}pt" if r0.font_size_pt else "?"
+                    styles=[s for s,v in [("粗",r0.bold),("斜",r0.italic),("底線",r0.underline)] if v]
+                    hint=(f'　首字樣式 {_swatch(r0.color_hex)}{r0.font_name} {sz} {r0.color_hex}'
+                          + ("　"+"・".join(styles) if styles else ""))
+                    full="".join(r.text for r in runs)
+                else:
+                    hint='　<span style="color:#c0392b">空圖層（可直接輸入）</span>'
+                    full=""
                 st.markdown(
-                    f'<div style="color:#444;font-size:.74rem;font-weight:600;'
-                    f'margin:.5rem 0 .2rem">圖層 L{layer["idx"]}'
-                    f'<span style="font-weight:400;color:#888">　位置 '
-                    f'x={p["x"]} y={p["y"]} w={p["w"]} h={p["h"]}　{len(layer["runs"])} 段</span></div>',
+                    f'<div style="color:#444;font-size:.74rem;font-weight:600;margin:.5rem 0 .2rem">'
+                    f'圖層 L{layer["idx"]}<span style="font-weight:400;color:#888">　'
+                    f'x={p["x"]} y={p["y"]} w={p["w"]} h={p["h"]}{hint}</span></div>',
                     unsafe_allow_html=True)
-                run_keys=tuple(f"txt_{gi}_{si_orig}_{layer['idx']}_{ri}"
-                               for ri in range(len(layer["runs"])))
-                disp=_run_display_texts(layer["runs"])
-                for ri,run in enumerate(layer["runs"]):
-                    k=run_keys[ri]
-                    if k not in st.session_state:
-                        st.session_state[k]=disp[ri]
-                    sz=f"{run.font_size_pt:g}pt" if run.font_size_pt else "?"
-                    styles=[s for s,v in [("粗",run.bold),("斜",run.italic),("底線",run.underline)] if v]
-                    ci,ct=st.columns([1,3])
-                    with ci:
-                        # 下左：三小橫行顯示樣式
-                        st.markdown(
-                            f'<div style="font-size:.7rem;line-height:1.6;color:#666">'
-                            f'<b>R{ri}</b>　{run.font_name}<br>'
-                            f'{sz}<br>'
-                            f'{_swatch(run.color_hex)}{run.color_hex}'
-                            f'{("　"+"・".join(styles)) if styles else ""}</div>',
-                            unsafe_allow_html=True)
-                    with ct:
-                        # 下：多行輸入修改框（高度隨行數，段內可直接按 Enter 換行）
-                        _h=max(68, min(220, 26*(disp[ri].count("\n")+1)+16))
-                        st.text_area(f"R{ri}", key=k, height=_h,
-                                     label_visibility="collapsed",
-                                     on_change=_save_text_layer,
-                                     args=(gi, si_orig, layer["idx"], run_keys))
-                    # 段落之間留間距，讓不同段更分明
-                    if ri < len(layer["runs"])-1:
-                        st.markdown("<div style='height:.5rem'></div>",
-                                    unsafe_allow_html=True)
+                k=f"txt_{gi}_{si_orig}_{layer['idx']}"
+                if k not in st.session_state: st.session_state[k]=full
+                _h=max(68, min(240, 26*(full.count("\n")+1)+16))
+                st.text_area(f"L{layer['idx']}", key=k, height=_h,
+                             label_visibility="collapsed",
+                             on_change=_save_layer_text,
+                             args=(gi, si_orig, layer["idx"], k))
             st.markdown("<hr style='margin:.25rem 0;border:none;border-top:1px solid #eee'>",
                         unsafe_allow_html=True)
 
 
 with tab_text:
-    st.caption("多行輸入，段內換行直接按 Enter。各段保留原字體/字級/顏色；段與段之間的換行會自動處理、不顯示。"
-               "清空某段並失焦即刪除該段。（繁→簡、拼音在「模板」分頁）")
+    st.caption("每個圖層一個輸入框、可多行（換行直接按 Enter）。存檔時整層套用「首字樣式」"
+               "（第一段的字體/字級/顏色），所以同層原本不同樣式會統一。（繁→簡、拼音在「模板」分頁）")
     if st.session_state.get("_del_ask") is not None:     # 刪除投影片確認框
         _del_slide_dialog(st.session_state["_del_ask"])
     _write_tab()

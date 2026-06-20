@@ -63,22 +63,6 @@ def test_tidy_runs(app):
     assert out == "祖創\n統管 一切"
 
 
-# ── 撰寫頁：隱藏/補回段間換行 round-trip ────────────────────────
-def test_display_compose_roundtrip(app):
-    runs = [R("《\n"), R("shout\n"), R("》")]   # 《↵ / shout↵ / 》
-    disp = app._run_display_texts(runs)
-    assert disp == ["《", "shout", "》"]          # 段間換行隱藏
-    real = app._compose_from_display(runs, disp)
-    assert real == [r.text for r in runs]                  # 補回後完全還原
-
-def test_display_real_newline(app):
-    # 段內換行用「真實換行」呈現（非字面 \n），多行輸入框可直接編輯
-    runs = [R("line1\nline2\n"), R("next")]                 # 段0 內含換行 + 段尾邊界換行
-    disp = app._run_display_texts(runs)
-    assert disp == ["line1\nline2", "next"]                 # 真實換行、不是 "line1\\nline2"
-    assert app._compose_from_display(runs, disp) == [r.text for r in runs]
-
-
 # ── 小工具 ──────────────────────────────────────────────────────
 def test_rgba_hex(app):
     assert app._rgba_hex("1 1 1 1") == "#FFFFFF"
