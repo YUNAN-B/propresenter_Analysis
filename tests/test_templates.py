@@ -119,19 +119,37 @@ def test_tidy_drop_single_nl(app):
     assert app._tidy_runs([NS(text="主\n愛我")])[0] == "主\n愛我"
 
 def test_merge_runs_keep_lines(app, sample):
-    # 合併「因格式不同而切開的 run」：統一樣式但「保留換行與行結構」，只去行首尾空白
+    # 合併「因格式不同而切開的 run」：統一樣式，同樣式換行保留、只去行首尾空白
     from types import SimpleNamespace as NS
     j = app._merge_runs_plain
-    assert j([NS(text="紅"), NS(text="\n藍")]) == "紅\n藍"               # 換行保留
+    # 無樣式 stub＝同樣式 → 換行全保留（本來就要的斷行）
     assert j([NS(text="主啊 "), NS(text="\n敬拜")]) == "主啊\n敬拜"       # 行尾空格去掉、換行留
     assert j([NS(text="主啊"), NS(text="\n　敬拜")]) == "主啊\n敬拜"       # 行首全形空格也去
     assert j([NS(text="A\nB"), NS(text="\nC")]) == "A\nB\nC"           # 多行全保留
     assert j([NS(text="第一行\n第二行\n第三行")]) == "第一行\n第二行\n第三行"  # 不會被併成一行
-    # 端對端：fixture multicolor（紅 cf1 / 藍 cf2）→ 併成單一樣式、仍是兩行「紅\n藍」
+    # 端對端：fixture multicolor（紅 cf1 / 藍 cf2，邊界 1 換行＝樣式切換多的）→ 併成一行「紅藍」
     nb, n = app._merge_layer_runs(sample)
     assert _ok(nb) and n >= 1
     mc = [tl for num, lab, tl in _layers(app, nb) if lab == "multicolor"][0]
-    assert len(mc) == 1 and mc[0][2] == "紅\n藍"
+    assert len(mc) == 1 and mc[0][2] == "紅藍"
+
+def test_drop_style_break_nl(app):
+    # 「換樣式時多插的換行」規則：樣式邊界換行扣一個、同樣式換行全保留
+    TR = app.TextRun
+    def r(text, font="A", color="#FFF"):
+        return TR(text, font, 100.0, color, False, False, False, [])
+    d = app._drop_style_break_nl
+    # 不同樣式、邊界 1 換行 → 接成同一行（換行是樣式切換多的）
+    assert d([r("I\n", "F1"), r("’\n", "F2"), r("m clean", "F1")]) == "I’m clean"
+    # 不同樣式、邊界 2 換行 → 留 1 個（一個原本要的、一個段落多的）
+    assert d([r("中文\n\n", "F1"), r("English", "F2")]) == "中文\nEnglish"
+    # 不同樣式、邊界 3 換行（中間夾純換行段）→ 留 2 個（保留空行）
+    assert d([r("clean \n", "F1"), r("\n\n", "F3"), r("曾", "F2")]) == "clean \n\n曾"
+    # 同樣式之間的換行（含空行）全部保留
+    assert d([r("第一行\n第二行")]) == "第一行\n第二行"
+    assert d([r("A\n\nB")]) == "A\n\nB"
+    # 顏色不同也算換樣式
+    assert d([r("紅", color="#F00"), r("\n藍", color="#00F")]) == "紅藍"
 
 def test_build_pro6_bilingual(app):
     nb = app._build_pro6_bilingual("讚美主\n哈利路亞", "Praise\nHallelu")

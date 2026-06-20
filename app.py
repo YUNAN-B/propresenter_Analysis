@@ -23,8 +23,9 @@ ProParse · 投影片解析 · Streamlit App
 ── 四個分頁（UI 在 §7）＋程式分區 ──────────────────────────────────
   1. 解析 — 唯讀檢視整份結構（§3 把每張排版成文字）。
   2. 模板 — 對全部投影片套一個動作（§TEMPLATES 清單 → §7 dispatch；分類見 _TPL_CAT）。
-  3. 撰寫 — 逐「圖層」編輯明文（一層一個多行框），存檔時整層套「首字樣式」（第一段的
-            字體/字級/顏色）；另可設群組/熱鍵、刪投影片。
+  3. 撰寫 — 逐「圖層」編輯明文（一層一個多行框，顯示已移除「換樣式多出來的換行」、
+            見下方不變量）；存檔時整層套「首字樣式」（第一段的字體/字級/顏色，同層多樣式
+            會統一、靜默不提示）；另可設群組/熱鍵、刪投影片。
   4. 創造 — 從純文字產生新的 .pro6。
   分區：§1 工具 · §2 RTF parser · §3 解析頁排版 · §4 RTF 轉換 · §5 結構化解析 ·
         §TEMPLATES · §6 XML 逆寫 · §7 UI。
@@ -38,6 +39,11 @@ ProParse · 投影片解析 · Streamlit App
   一旦用到 \uNNNN 就前置 \uc0，否則 ProPresenter 會吃掉下一個字（I've→I'e）。
 • run 邊界一定接換行：同層相鄰 run（樣式改變處）之間一定有換行（實測 100%）；
   parse_rtf 的 span 與 §6 的整層改寫都依賴這點。
+• 那個邊界換行是 ProPresenter 的「段落標記」、多出來的：實測若樣式邊界本來就要換行，
+  檔案會有兩個換行（一個原本要的、一個段落多的）。→ _drop_style_break_nl() 在「顯示整層
+  /合併/套樣式」時，把樣式邊界的連續換行數扣一個（1→0 接成同行、2→1 留一次換行）、
+  同樣式換行全保留。撰寫頁顯示、合併段落/雙排、套樣式都走它，避免單行被穿插斷開。
+  （注意：這只動「呈現/合併出的明文」，不影響上一條的逐 byte 定點逆寫。）
 • 拼音 = opencc(繁→簡) + pypinyin：先轉簡體才命中詞組字典、多音字才準。
 • 創造的 .pro6 必須補齊一堆必要屬性/子元素（見 _text_element），否則 ProPresenter 會
   deserialize 失敗 / NSPathStore nil。tests 有守這個結構。
@@ -314,6 +320,35 @@ def parse_rtf(rtf: str, keep_empty: bool = False) -> RTFResult:
 def parse_rtf_b64(b64: str) -> RTFResult:
     """RTFData base64 字串 → 直接 parse_rtf（顯示路徑用，不取 span）。"""
     return parse_rtf(base64.b64decode(b64.strip()).decode("utf-8",errors="replace"))
+
+def _style_key(r):
+    """run 的樣式指紋（字體/字級/顏色/粗斜底）；測試用的精簡 stub 缺欄位時以 None 補。"""
+    g=lambda k: getattr(r,k,None)
+    return (g("font_name"),g("font_size_pt"),g("color_hex"),g("bold"),g("italic"),g("underline"))
+
+def _drop_style_break_nl(runs) -> str:
+    """合併各段為純明文，並移除「換樣式時多插的那一個換行」。
+
+    ProPresenter 在樣式切換處會多放一個換行（段落標記）；實測：若樣式邊界本來就要
+    換行，檔案會有兩個換行（一個原本要的、一個段落多出來的）。故規則為——
+      • 樣式邊界（前後兩字樣式不同）上的連續換行，數量一律減一：
+        1 個（純樣式切換）→ 接成同一行；2 個 → 留 1 個（使用者真的要的那次換行）。
+      • 同樣式之間的換行全部保留（本來就要的斷行；含空行/段落分隔）。
+    傳入完整 run 串列（keep_empty=True，含純空白 run）才不會漏掉交界換行。"""
+    chars=[(ch,_style_key(r)) for r in runs for ch in r.text]
+    out=[]; i=0; n=len(chars)
+    while i<n:
+        if chars[i][0]!="\n":
+            out.append(chars[i][0]); i+=1; continue
+        j=i
+        while j<n and chars[j][0]=="\n": j+=1     # 連續換行群組 [i,j)
+        cnt=j-i
+        prev=chars[i-1][1] if i>0 else None       # 群組前一個字的樣式
+        nxt =chars[j][1]   if j<n else None       # 群組後一個字的樣式
+        if prev is not None and nxt is not None and prev!=nxt:
+            cnt-=1                                # 扣掉樣式切換多出來的段落換行
+        out.append("\n"*cnt); i=j
+    return "".join(out)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -670,13 +705,16 @@ def _parse_xml(xml_bytes: bytes):
             for li,el in enumerate(dnode if dnode is not None else []):
                 pn=el.find('RVRect3D[@rvXMLIvarName="position"]')
                 pos=_parse_pos(pn.text) if pn is not None else dict(x=0,y=0,z=0,w=0,h=0)
-                runs=[]
+                runs=[]; full=""
                 if el.tag=="RVTextElement":
                     rn=el.find('NSString[@rvXMLIvarName="RTFData"]')
                     if rn is not None:
-                        try: runs=parse_rtf_b64(rn.text).runs
+                        try:
+                            rtf=base64.b64decode(rn.text.strip()).decode("utf-8",errors="replace")
+                            runs=parse_rtf(rtf).runs                              # 顯示/逐段轉換用（濾空白段）
+                            full=_drop_style_break_nl(parse_rtf(rtf, keep_empty=True).runs)  # 撰寫頁整層文字
                         except: pass
-                layers.append(dict(idx=li, type=el.tag, pos=pos, runs=runs))
+                layers.append(dict(idx=li, type=el.tag, pos=pos, runs=runs, full=full))
             slides.append(dict(
                 num=snum, label=sa.get("label",""), hotKey=sa.get("hotKey",""),
                 bg=_rgba_hex(sa.get("backgroundColor","0 0 0 1")), layers=layers))
@@ -737,7 +775,7 @@ TEMPLATES: list[dict] = [
      "desc": "每張投影片只留前 N 個圖層（N 可輸入），後面的都刪掉",
      "action": "keep_first"},
     {"name": "合併圖層段落",
-     "desc": "把同一個圖層裡不同的段落合併",
+     "desc": "把同一圖層內因樣式不同而切開的段落併成單一樣式，並移除換樣式時多出來的換行",
      "action": "merge_runs"},
     {"name": "合併雙排",
      "desc": "投影片兩兩合併成上下兩行（前張在上、後張在下，逐圖層；圖層數取多），張數約減半",
@@ -847,12 +885,12 @@ def _keep_first_layers(xml_bytes: bytes, keep: int) -> tuple:
     return _xml_to_bytes(root,orig), n
 
 def _merge_runs_plain(runs) -> str:
-    """把多個 run 合併成單一樣式的明文：**保留全部文字與行結構**（行與行之間的換行
-    保留，不會併成一行），只去掉各行行首尾殘留的水平空白（半/全形、tab、NBSP、零寬等）。
-    傳入完整 run 串列（含純空白 run）以免漏掉交界換行。
-    例：「紅」＋「\\n藍」→「紅\\n藍」；「主啊 」＋「\\n敬拜」→「主啊\\n敬拜」。"""
+    """把多個 run 合併成單一樣式的明文：先移除「換樣式時多插的換行」（見
+    _drop_style_break_nl——樣式邊界的換行扣一個、同樣式換行全保留），再去掉各行行首尾
+    殘留的水平空白（半/全形、tab、NBSP、零寬等）。傳入完整 run 串列（含純空白 run）。
+    例（樣式不同）：「紅」＋「\\n藍」→「紅藍」；同樣式「第一行\\n第二行」→「第一行\\n第二行」。"""
     out=[]
-    for line in "".join(r.text for r in runs).split("\n"):
+    for line in _drop_style_break_nl(runs).split("\n"):
         a=0; b=len(line)
         while a<b and _is_ws(line[a]):   a+=1      # 去行首水平空白
         while b>a and _is_ws(line[b-1]): b-=1      # 去行尾水平空白
@@ -967,9 +1005,10 @@ def _pinyin_has_multiline(xml_bytes: bytes) -> bool:
 
 
 def _el_plain(el) -> str:
-    """文字元素的純明文（解碼 RTFData → plain）。"""
+    """文字元素的純明文：解碼 RTFData → 合併各段、移除樣式切換多出來的換行
+    （見 _drop_style_break_nl）。供合併雙排 / 套樣式取「使用者真正的版面」。"""
     rtf=_decode_rtf(_rtf_node(el))
-    return "" if rtf is None else parse_rtf(rtf).plain()
+    return "" if rtf is None else _drop_style_break_nl(parse_rtf(rtf, keep_empty=True).runs)
 
 # 所有「空白」：半/全形空格、tab、各種 Unicode 空白（NBSP、thin/en/em、narrow NBSP、
 # figure space…）與零寬空白等一律視為空白；但 \n/\r 留作行邊界，不算。用 regex 一網打盡。
@@ -1810,16 +1849,16 @@ def _write_tab():
                     st.session_state["_del_ask"]=num; st.rerun()
             for layer in [l for l in slide["layers"] if l["type"]=="RVTextElement"]:
                 p=layer["pos"]; runs=layer["runs"]
+                # full＝整層文字，已移除「換樣式時多出來的換行」（見 _drop_style_break_nl）
+                full=layer.get("full","")
                 if runs:                                  # 首字（第一段）樣式提示
                     r0=runs[0]
                     sz=f"{r0.font_size_pt:g}pt" if r0.font_size_pt else "?"
                     styles=[s for s,v in [("粗",r0.bold),("斜",r0.italic),("底線",r0.underline)] if v]
                     hint=(f'　首字樣式 {_swatch(r0.color_hex)}{r0.font_name} {sz} {r0.color_hex}'
                           + ("　"+"・".join(styles) if styles else ""))
-                    full="".join(r.text for r in runs)
                 else:
                     hint='　<span style="color:#c0392b">空圖層（可直接輸入）</span>'
-                    full=""
                 st.markdown(
                     f'<div style="color:#444;font-size:.74rem;font-weight:600;margin:.5rem 0 .2rem">'
                     f'圖層 L{layer["idx"]}<span style="font-weight:400;color:#888">　'
