@@ -1,38 +1,58 @@
 r"""
 ProParse · 投影片解析 · Streamlit App
 ═══════════════════════════════════════════════════════════════════
+批次檢視 / 編輯 ProPresenter 6（.pro6）檔，特別為雙語歌詞設計。
+線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 
-編輯 ProPresenter 6（.pro6 / .xml）檔。所有編輯只動三個維度：
-  圖層（displayElements 子元素）、位置（RVRect3D）、明文（RTFData 內的 base64 RTF）。
+── 術語（ProPresenter / pro6 結構；程式裡到處都是）───────────────────
+  pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
+  document .......... 根節點 RVPresentationDocument，帶標題/解析度/CCLI 等屬性。
+  group（群組）...... RVSlideGrouping，有 name、color；把投影片分段（主歌/副歌…）。
+                      撰寫頁的「段落類型」就是設這個（見 _GROUP_PRESETS）。
+  slide（投影片）.... RVDisplaySlide，有 hotKey、label、背景 cue、displayElements。
+  displayElements ... slide 底下的「圖層陣列」。
+  圖層（layer）...... displayElements 的子元素：RVTextElement（文字，最常動）、
+                      RVImageElement / RVVideoElement / RVShapeElement / RVBezierPathElement。
+  position .......... RVRect3D，字串「{x y z w h}」。
+  RTFData ........... 文字圖層的內文 = base64 編碼的 RTF（解析見 §2 parse_rtf）。
+  run（段）.......... 一個文字圖層內「同一種樣式」的連續片段（字體/字級/顏色/粗斜底）；
+                      一層可有多個 run。撰寫頁以「整層」為單位編輯，parse / 模板仍以 run 為單位。
 
-四個分頁：
-  1. 解析 — 唯讀檢視（§3 排版輸出）
-  2. 模板 — 對全部投影片套用一個動作（§TEMPLATES 清單 + §7 dispatch）
-  3. 撰寫 — 逐段編輯明文、設定段落類型(group)/熱鍵、刪除投影片；失焦自動儲存
-  4. 創造 — 從純文字產生新的 .pro6
+所有編輯只動三個維度：圖層（displayElements 子元素）、位置（RVRect3D）、明文（RTFData）。
 
-────────────────────────────────────────────────────────────────────
-核心不變量（都是踩過坑換來的，動程式碼前務必先讀）：
+── 四個分頁（UI 在 §7）＋程式分區 ──────────────────────────────────
+  1. 解析 — 唯讀檢視整份結構（§3 把每張排版成文字）。
+  2. 模板 — 對全部投影片套一個動作（§TEMPLATES 清單 → §7 dispatch；分類見 _TPL_CAT）。
+  3. 撰寫 — 逐「圖層」編輯明文（一層一個多行框），存檔時整層套「首字樣式」（第一段的
+            字體/字級/顏色）；另可設群組/熱鍵、刪投影片。
+  4. 創造 — 從純文字產生新的 .pro6。
+  分區：§1 工具 · §2 RTF parser · §3 解析頁排版 · §4 RTF 轉換 · §5 結構化解析 ·
+        §TEMPLATES · §6 XML 逆寫 · §7 UI。
 
-• 為什麼不直接 ET round-trip 整份檔：ET.tostring 會把 <x></x> 折成 <x/>，
-  而原始 pro6 從不用自閉合標籤，ProPresenter 可能因此讀不回去。
-  → _xml_to_bytes() 序列化後一律把 <x/> 展開回 <x></x>。原始檔即可逐字節無損。
+── 核心不變量（踩坑換來的，動程式碼前務必先讀）─────────────────────
+• 不整份 ET round-trip：ET.tostring 會把 <x></x> 折成 <x/>，原始 pro6 從不用自閉合
+  標籤、ProPresenter 可能讀不回。→ _xml_to_bytes() 序列化後一律展開回 <x></x>，無損。
+• 明文逆寫＝定點字串替換：parse_rtf(keep_empty=True) 記每個 run 文字 token 在原 rtf 的
+  絕對 span，只替換被動到的片段、保留 RTF header 與控制字 → 無改動的 byte 完全不變。
+• \uc0 陷阱：RTF \uNNNN 後要跳過 \uc 個替代字元（pro6 預設 \uc1）；_encode_run_text()
+  一旦用到 \uNNNN 就前置 \uc0，否則 ProPresenter 會吃掉下一個字（I've→I'e）。
+• run 邊界一定接換行：同層相鄰 run（樣式改變處）之間一定有換行（實測 100%）；
+  parse_rtf 的 span 與 §6 的整層改寫都依賴這點。
+• 拼音 = opencc(繁→簡) + pypinyin：先轉簡體才命中詞組字典、多音字才準。
+• 創造的 .pro6 必須補齊一堆必要屬性/子元素（見 _text_element），否則 ProPresenter 會
+  deserialize 失敗 / NSPathStore nil。tests 有守這個結構。
 
-• 明文逆寫是「定點字串替換」：parse_rtf(keep_empty=True) 為每個 run 記錄文字
-  token 在原 rtf 的絕對 span；改寫時只替換被動到的片段，保留 header 與所有控制字。
-  → 無改動的儲存 byte 完全不變（避免假性 diff）。
+── 其他要知道的 ────────────────────────────────────────────────────
+• 快取：_doc_summary（側邊欄用）回純資料、可 @st.cache_data；_parse_xml 含 TextRun
+  dataclass 無法穩定 pickle，故不快取（每次重解析，夠快）。
+• 卡住自救：工具列設 minimal（藏掉內建 Clear cache），故側邊欄有「🔄 重設」(_soft_reset)
+  清全域快取＋暫態旗標；_commit_change 存檔前先驗證 XML 合法，壞檔不入狀態。
+• 上傳識別碼 _fk 用「原始檔長度」，必須在 _normalize_preset_groups 之前算（見該處註解）。
+• 匯出時自動修復重複 UUID（_dedup_uuids）。
 
-• \uc0 陷阱：RTF 的 \uNNNN 後面要跳過 \uc 個「替代字元」。pro6 的 \uc0 宣告
-  可能在某行文字之後，之前是預設 \uc1（跳過 1 個）。所以 _encode_run_text() 一旦
-  用到 \uNNNN 就前置 \uc0，否則 ProPresenter 會吃掉下一個字（如 I've→I'e）。
-
-• 段（run）邊界一定接換行：同一文字圖層中相鄰 run（樣式改變處）之間一定有換行
-  （實測 100%）。撰寫頁據此「隱藏段間換行、輸出時補回」；偵測不到換行時就不隱藏。
-
-• 拼音 = opencc(繁→簡) + pypinyin：先轉簡體才命中 pypinyin 的詞組字典，多音字才準。
-
-▶ 新增/調整模板：改 §TEMPLATES 清單（加一個 {name,desc,action}）+ §7 dispatch 加一個
-  elif 分支 + §7 _TPL_CAT 加分類。處理函式放 §6。
+▶ 新增/調整模板：§TEMPLATES 加 {name,desc,action} → §7 dispatch 加 elif → _TPL_CAT 加
+  分類；處理函式放 §6（吃 xml_bytes、回 (new_bytes, n)）。測試在 tests/（pytest），
+  合成 fixture 由 tests/make_fixtures.py 產生、無版權內容。
 """
 
 import base64
@@ -628,8 +648,8 @@ def _parse_xml(xml_bytes: bytes):
     """把整份 XML 拆成結構化資料 (doc_meta, groups)，供模板/撰寫頁使用。
     groups[].slides[].layers[] 帶 type/pos/runs。
     不快取：回傳含 TextRun dataclass，st.cache_data 需 pickle 而無法穩定序列化
-    （fragment-only 重跑時首次寫入快取會丟 UnserializableReturnValueError）；
-    解析夠快，且各模板本來就每次重新解析。"""
+    （fragment-only 重跑時首次寫入快取會丟 UnserializableReturnValueError）；解析夠快，
+    每次重新解析即可。側邊欄要的純資料另走可快取的 _doc_summary。"""
     root=ET.fromstring(xml_bytes.decode("utf-8")); doc=root.attrib
     gnode=root.find('.//array[@rvXMLIvarName="groups"]')
     doc_meta={
@@ -1311,12 +1331,17 @@ def _delete_slide_by_num(xml_bytes: bytes, num: int) -> tuple:
 # ═══════════════════════════════════════════════════════════════
 
 # 分頁圖示(favicon)：工程帽。page_icon 接受字串路徑，錨定腳本目錄避免雲端 CWD 差異
-# ⋮ 選單「關於此工具」內容（待補：之後再寫正式說明）
+# ⋮ 選單「關於此工具」內容
 _ABOUT_TEXT = """### ProParse · 投影片解析
 
-ProPresenter 投影片（.pro6 / .xml）批次檢視與編輯工具。
+ProPresenter 6（.pro6）投影片的批次檢視與編輯工具，特別適合雙語歌詞。
 
-_（關於內容待補）_
+- **解析**：唯讀檢視整份檔的結構與明文。
+- **模板**：對全部投影片套用一個批次動作（整理空格、繁簡、拼音、合併雙排…）。
+- **撰寫**：逐圖層編輯文字，並可設段落類型(group)、熱鍵、刪投影片。
+- **創造**：從純文字產生新的 .pro6。
+
+編輯後從左側欄匯出 .pro6。
 """
 
 st.set_page_config(
@@ -1530,8 +1555,7 @@ except Exception:
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"**{doc_meta['title'] or '(無標題)'}**")
-    # 文件詳細資訊：與原「尺寸」同一種小灰字（caption），不加框、一行一行列；
-    # 群組以 • 列點（取代下方重複的彩色圓點清單）。
+    # 文件資訊用小灰字（caption）一行一行列，群組以 • 列點。
     _info=[doc_meta["res"]]
     if doc_meta["author"]:    _info.append(f"作者：{doc_meta['author']}")
     if doc_meta["publisher"]: _info.append(f"出版：{doc_meta['publisher']}")
@@ -1573,7 +1597,7 @@ tab_parse, tab_tpl, tab_text, tab_new = st.tabs(["解析", "模板", "撰寫", "
 
 # ─── TAB 1: 解析 ──────────────────────────────────────────────
 with tab_parse:
-    st.caption("唯讀檢視。文件詳細資訊已移至左側欄。")
+    st.caption("唯讀檢視整份檔。文件資訊見左側欄。")
     for gname,gcolor,slides in _build_parse_display(xml_bytes):
         c=gcolor
         dot=(f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
@@ -1628,7 +1652,7 @@ with tab_tpl:
             ti,tpl=_a,_b
             if _j%3==0: _cols=st.columns(3)
             with _cols[_j%3], st.container(border=True):
-                # 名稱已夠直覺；說明改成名稱旁的小問號 ? 提示（滑過顯示），版面更清爽
+                # 說明放在名稱旁的小問號 ? 提示（滑過顯示）
                 st.markdown(f"**{tpl['name']}**", help=tpl["desc"])
                 action=tpl.get("action")
                 # 展開內只放「額外選項 + 套用按鈕」
