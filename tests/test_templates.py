@@ -114,6 +114,36 @@ def test_del_last_layer(app):
     assert n == 1 and _ok(nb)
     assert len(_layers(app, nb)[0][2]) == 2
 
+def test_bulk_fill_overwrite(app):
+    doc = app._build_pro6_bilingual("中一\n中二", "En1\nEn2")   # 2 張、各 2 文字層
+    nb, n, err = app._bulk_fill_lines(doc, ["新一", "新二"], 1)
+    assert err is None and n == 2 and _ok(nb)
+    rows = _layers(app, nb)                            # 第 1 個文字圖層被覆蓋
+    assert rows[0][2][0][2] == "新一" and rows[1][2][0][2] == "新二"
+
+def test_bulk_fill_new_layer(app):
+    doc = app._build_pro6_bilingual("中一\n中二", "En1\nEn2")   # 各 2 層；超過＝填 3
+    before = len(_layers(app, doc)[0][2])
+    nb, n, err = app._bulk_fill_lines(doc, ["尾一", "尾二"], 3)
+    assert err is None and n == 2 and _ok(nb)
+    rows = _layers(app, nb)
+    assert len(rows[0][2]) == before + 1              # 末端多一層
+    texts0 = [t for _, _, t, _ in rows[0][2]]
+    assert "尾一" in texts0 and "中一" in texts0         # 新增放尾、原文保留
+
+def test_bulk_fill_count_mismatch(app):
+    doc = app._build_pro6_bilingual("中一\n中二", "En1\nEn2")   # 2 頁
+    nb, n, err = app._bulk_fill_lines(doc, ["只有一行"], 1)
+    assert err is not None and n == 0 and nb is doc    # 行數不符 → 不動
+
+def test_wrap_title_marks(app):
+    doc = app._build_pro6_structured("標題行", "空行", "換行")   # 1 張 1 層
+    nb, n = app._wrap_title_marks(doc)
+    assert n == 1 and _ok(nb)
+    assert _layers(app, nb)[0][2][0][2] == "《標題行》"
+    nb2, n2 = app._wrap_title_marks(nb)                # 冪等：已包則不動
+    assert n2 == 0 and nb2 is nb
+
 def test_apply_style(app):
     assert len(app._STYLES) >= 1                      # styles.json 有載入
     doc = app._build_pro6_bilingual("中一\n中二", "En1\nEn2")   # 2 層雙語

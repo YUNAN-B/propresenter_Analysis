@@ -1130,6 +1130,46 @@ def _add_layer_all(xml_bytes: bytes, text: str="-") -> tuple:
         elems.append(new_el); n+=1
     return _xml_to_bytes(root,orig), n
 
+def _text_slide_targets(root) -> list:
+    """依文件順序回傳所有「有文字圖層」的投影片：[(displayElements, [文字圖層…])…]。"""
+    out=[]
+    for sl, elems in _iter_slides(root):
+        if elems is None: continue
+        tl=[e for e in elems if e.tag=="RVTextElement"]
+        if tl: out.append((elems, tl))
+    return out
+
+def _bulk_fill_lines(xml_bytes: bytes, lines: list, layer_idx: int) -> tuple:
+    """把 lines（每頁一行，依文件順序）填進每張有文字圖層的投影片：
+      • layer_idx ≤ 該張文字層數 → 覆蓋第 layer_idx 個文字圖層的內文；
+      • layer_idx 超過該張層數 → 在最後新增一個文字圖層（複製該張末層為範本）放這行。
+    以「首字樣式」單一樣式寫入。行數需等於目標頁數。回傳 (new_bytes, n, err)。"""
+    root, orig = _load_root(xml_bytes)
+    targets=_text_slide_targets(root)
+    if len(lines)!=len(targets):
+        return xml_bytes, 0, f"行數（{len(lines)}）需等於可填頁數（{len(targets)}）"
+    n=0
+    for (elems, tl), line in zip(targets, lines):
+        if layer_idx<=len(tl):
+            if _set_el_text(tl[layer_idx-1], line): n+=1
+        else:                                    # 超過現有層數 → 末端新增一層
+            new_el=copy.deepcopy(tl[-1]); new_el.set("UUID", _new_uuid())
+            _set_el_text(new_el, line); elems.append(new_el); n+=1
+    return _xml_to_bytes(root,orig), n, None
+
+def _wrap_title_marks(xml_bytes: bytes) -> tuple:
+    """把首頁（第一張有文字圖層的投影片）第一個文字圖層的內文左右加上書名號《》。
+    已是《…》則不動（不重複包）。回傳 (new_bytes, n)。"""
+    root, orig = _load_root(xml_bytes)
+    targets=_text_slide_targets(root)
+    if not targets: return xml_bytes, 0
+    el=targets[0][1][0]                          # 首頁首圖層
+    plain=_el_plain(el).strip()
+    if not plain or (plain.startswith("《") and plain.endswith("》")):
+        return xml_bytes, 0
+    if not _set_el_text(el, "《"+plain+"》"): return xml_bytes, 0
+    return _xml_to_bytes(root,orig), 1
+
 def _apply_pinyin(xml_bytes: bytes, mi_to_ni: bool=True, keep_breaks: bool=False) -> tuple:
     """每張第一層中文→拼音（不含聲調）寫入第二層。回傳 (new_bytes, n, engine)。
     mi_to_ni=True：把敬語「祢」拼音由 mi 改 ni。keep_breaks：是否跟隨中文換行斷句。"""
@@ -1406,6 +1446,7 @@ def _apply_style(xml_bytes, style_name):
 # ── 撰寫頁：段落類型（group）與熱鍵（hotKey）────────────────────
 # 段落類型＝名稱 ↔ 顏色綁定。色碼之後可調整；要加類型在這裡加一項即可。
 _GROUP_PRESETS = [
+    ("標題",       "#8E44AD"),   # 標題・紫（套用時首頁首圖層自動加書名號《》）
     ("Verse",      "#3B6FD4"),   # 主歌・藍
     ("Chorus",     "#D0021B"),   # 副歌・紅
     ("Pre-Chorus", "#F5C518"),   # 黃
@@ -1414,7 +1455,8 @@ _GROUP_PRESETS = [
 ]
 _GROUP_COLOR = dict(_GROUP_PRESETS)
 # 撰寫頁 UI 用的彩色圓點（對應綁定色，標在類型名稱前面）
-_GROUP_EMOJI = {"Verse":"🔵", "Chorus":"🔴", "Pre-Chorus":"🟡", "Bridge":"⚪", "Verse 2":"🟢"}
+_GROUP_EMOJI = {"標題":"🟣", "Verse":"🔵", "Chorus":"🔴", "Pre-Chorus":"🟡",
+                "Bridge":"⚪", "Verse 2":"🟢"}
 
 def _hex_rgba(hx: str, a: float = 1.0) -> str:
     """#RRGGBB → ProPresenter 顏色字串「r g b a」(各 0~1，6 位小數)。"""
@@ -1926,6 +1968,46 @@ with tab_tpl:
                     except Exception as e:
                         st.error(f"套用時發生問題：{e}（檔案未變動，可改用側邊欄「🔄 卡住了？重設」）")
 
+    # ── 第三部分：大量填入文字（每頁一行，依序填入指定圖層）──────────
+    st.divider()
+    with st.container(border=True):
+        st.markdown("**大量填入文字**",
+                    help="貼上和頁數相同行數的文字，一行對一頁、按文件順序填入指定的文字圖層。")
+        _bm, _bg = _parse_xml(st.session_state["xml_content"])
+        _btargets = [s for g in _bg for s in g["slides"]
+                     if any(l["type"]=="RVTextElement" for l in s["layers"])]
+        _bmax = max((sum(1 for l in s["layers"] if l["type"]=="RVTextElement")
+                     for g in _bg for s in g["slides"]), default=0)
+        _bc1, _bc2 = st.columns([1,2])
+        _blayer = _bc1.number_input(
+            "覆蓋第幾個文字圖層", min_value=1, max_value=max(_bmax+1, 1), value=1, step=1,
+            key="bulk_layer",
+            help=(f"1～{_bmax}：覆蓋每頁第 N 個文字圖層的內文；"
+                  f"填 {_bmax+1}（超過現有層數）＝在每頁最後新增一個圖層放這些文字。"))
+        _bc2.caption(f"可填 **{len(_btargets)}** 頁（有文字圖層的投影片）。"
+                     f"目前各頁最多 {_bmax} 個文字圖層。")
+        _btext = st.text_area("貼上文字（每頁一行）", key="bulk_text", height=240,
+                              placeholder="第一頁\n第二頁\n第三頁\n…",
+                              label_visibility="collapsed")
+        _blines = _btext.split("\n")
+        if len(_blines) > 1 and _blines[-1] == "": _blines = _blines[:-1]   # 去掉尾端多的一行
+        _bok = len(_btargets) > 0 and len(_blines) == len(_btargets)
+        st.caption(f"輸入 **{len(_blines)}** 行 ／ 需要 **{len(_btargets)}** 行"
+                   + ("　✅ 行數相符" if _bok else "　⚠️ 行數需與頁數相符才能填入"))
+        if st.button("填入全部投影片", key="bulk_apply", type="primary",
+                     use_container_width=True, disabled=not _bok):
+            try:
+                _bnb,_bn,_berr = _bulk_fill_lines(
+                    st.session_state["xml_content"], _blines, int(_blayer))
+                if _berr:
+                    st.error(_berr)
+                elif _bn == 0:
+                    st.info("沒有任何變更（內容與原本相同？）")
+                else:
+                    _commit_change("大量填入", _bnb, _bn, f"已把文字填入 {_bn} 張投影片")
+            except Exception as e:
+                st.error(f"填入時發生問題：{e}（檔案未變動，可改用側邊欄「🔄 卡住了？重設」）")
+
 
 # ─── TAB 3: 撰寫（逐段編輯明文，失焦自動儲存）─────────────────
 # 包成 fragment：編輯/儲存單一段落時只重跑此區塊，不重新解析整份檔案、不動其他分頁。
@@ -1963,9 +2045,12 @@ def _write_tab():
         st.session_state["history"].append(f"文字G{gi}S{si}L{li}")
 
     def _set_group(num, name, color):
-        """按了段落類型按鈕：從這張往後（同組連續範圍）整段套用名稱+顏色，整頁刷新。"""
+        """按了段落類型按鈕：從這張往後（同組連續範圍）整段套用名稱+顏色，整頁刷新。
+        類型為「標題」時，另把首頁首圖層內文左右加上書名號《》（已包則不動）。"""
         xml=st.session_state["xml_content"]
         nb,err=_set_group_fill(xml, num, name, color)
+        if not err and name=="標題":
+            nb,_=_wrap_title_marks(nb)               # 順帶把首頁首圖層包成《…》
         if not err and nb is not xml:
             _push_undo(); st.session_state["xml_content"]=nb
             st.session_state["history"].append(f"群組S{num}:{name}")
