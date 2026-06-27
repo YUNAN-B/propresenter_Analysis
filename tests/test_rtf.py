@@ -63,6 +63,11 @@ def test_tidy_runs(app):
     assert out == "祖創\n統管 一切"
 
 
+def test_runs_to_lines(app):
+    lines = app._runs_to_lines([R("《\n"), R("shout\n"), R("》")])
+    assert [t for t, _ in lines] == ["《", "shout", "》"]
+
+
 # ── 小工具 ──────────────────────────────────────────────────────
 def test_rgba_hex(app):
     assert app._rgba_hex("1 1 1 1") == "#FFFFFF"

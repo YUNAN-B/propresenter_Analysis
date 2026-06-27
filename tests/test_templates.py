@@ -20,6 +20,13 @@ def _layers(app, b):
 
 
 # ── 統整 ────────────────────────────────────────────────────────
+def test_prune_empty_layers(app, sample):
+    nb, n = app._prune_empty_layers(sample)
+    assert n == 2 and _ok(nb)                     # s3 的空圖層 + placeholder
+    # s3 應再無文字圖層
+    s3 = [tl for num, lab, tl in _layers(app, nb) if lab == "empties"][0]
+    assert s3 == []
+
 def test_prune_slides(app, sample):
     nb, n = app._delete_empty_slides(sample, keep_bg=True)
     assert n == 1 and _ok(nb)                     # s4 無圖層
@@ -70,6 +77,42 @@ def test_reverse_layers(app, sample):
     assert n >= 1 and _ok(nb)
     # 文字順序前後顛倒
     assert [t for _, _, t, _ in before] == list(reversed([t for _, _, t, _ in after]))
+
+def test_split_layer_lines(app, sample):
+    nb, n = app._split_layer_lines(sample)
+    assert n >= 1 and _ok(nb)
+    s1 = [tl for num, lab, tl in _layers(app, nb) if lab == "bilingual"][0]
+    texts = [t for _, _, t, _ in s1]
+    assert "讚美主" in texts and "哈利路亞" in texts   # 兩行各成一層
+    # 後拆出的那層 y 較大（略低）
+    ys = {t: y for _, y, t, _ in s1}
+    assert ys["哈利路亞"] > ys["讚美主"]
+
+def test_split_layers_to_slides(app):
+    # 創造出「1 張、多個單行圖層」（無空行、換行換圖層）→ 應能拆成多張
+    doc = app._build_pro6_structured("標題\n第一句\n第二句\n第三句", "空行", "換行")
+    assert len(_layers(app, doc)) == 1                  # 先是 1 張
+    nb, n = app._split_layers_to_slides(doc)
+    assert n == 3 and _ok(nb)                           # 4 層 → 4 張（+3）
+    rows = _layers(app, nb)
+    assert len(rows) == 4
+    for _, _, tl in rows:
+        assert len(tl) == 1                             # 每張只剩一個文字層
+        assert tl[0][1] == 0                            # y=0（全幅置中）
+
+def test_add_layer_all(app, sample):
+    nb, n = app._add_layer_all(sample)
+    assert n == 7 and _ok(nb)                          # 7 張各加一層
+    allt = [t for _, _, tl in _layers(app, nb) for _, _, t, _ in tl]
+    assert allt.count("-") == 7
+
+def test_del_last_layer(app):
+    # 一張三層 → 刪掉最後一層剩兩層
+    doc = app._build_pro6_structured("甲\n乙\n丙", "空行", "換行")
+    assert len(_layers(app, doc)[0][2]) == 3
+    nb, n = app._del_last_layer(doc)
+    assert n == 1 and _ok(nb)
+    assert len(_layers(app, nb)[0][2]) == 2
 
 def test_apply_style(app):
     assert len(app._STYLES) >= 1                      # styles.json 有載入
