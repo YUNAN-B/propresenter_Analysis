@@ -4,19 +4,39 @@ ProParse · 投影片解析 · Streamlit App
 批次檢視 / 編輯 ProPresenter 6（.pro6）檔，特別為雙語歌詞設計。
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 
-── 術語（ProPresenter / pro6 結構；程式裡到處都是）───────────────────
+── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
   pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
+  ProPresenter ...... 教會/活動現場投影歌詞與簡報的軟體（本專案目標版本：6.5.3）。
+  rvXMLIvarName ..... pro6 XML 拿這個「屬性」當欄位名；找節點全靠它，
+                      例：array[@rvXMLIvarName="groups"]＝名為 groups 的陣列節點。
   document .......... 根節點 RVPresentationDocument，帶標題/解析度/CCLI 等屬性。
+  CCLI .............. 教會詩歌的授權編號制度；pro6 用 CCLISongTitle/CCLIAuthor… 等屬性存歌名/作者。
   group（群組）...... RVSlideGrouping，有 name、color；把投影片分段（主歌/副歌…）。
                       撰寫頁的「段落類型」就是設這個（見 _GROUP_PRESETS）。
-  slide（投影片）.... RVDisplaySlide，有 hotKey、label、背景 cue、displayElements。
-  displayElements ... slide 底下的「圖層陣列」。
+  slide（投影片）.... RVDisplaySlide，有 hotKey（熱鍵）、label（標籤）、背景 cue、displayElements。
+  cue ............... ProPresenter 的「觸發指令」；這裡只碰 backgroundMediaCue（背景影片/圖片）。
+  displayElements ... slide 底下的「圖層陣列」（array 節點）。
   圖層（layer）...... displayElements 的子元素：RVTextElement（文字，最常動）、
                       RVImageElement / RVVideoElement / RVShapeElement / RVBezierPathElement。
-  position .......... RVRect3D，字串「{x y z w h}」。
-  RTFData ........... 文字圖層的內文 = base64 編碼的 RTF（解析見 §2 parse_rtf）。
+  position .......... RVRect3D，字串「{x y z w h}」（x,y 左上角座標；w,h 寬高；單位 px）。
+  UUID .............. 每個元素的唯一識別碼；不可重複（匯出時 _dedup_uuids 自動修）。
+  RTFData ........... 文字圖層的內文 = base64 編碼的 RTF（見下方術語②、解析見 §2 parse_rtf）。
   run（段）.......... 一個文字圖層內「同一種樣式」的連續片段（字體/字級/顏色/粗斜底）；
                       一層可有多個 run。撰寫頁以「整層」為單位編輯，parse / 模板仍以 run 為單位。
+
+── 術語 ②：RTF（文字圖層的內文格式；解析/編碼見 §2、§4）────────────────────
+  RTF ............... Rich Text Format，純文字 ＋ 以反斜線開頭的「控制字」描述樣式。
+  控制字 ............ 例 \b（粗體開）；名稱後接數字＝參數，如 \f3＝用第 3 個字型。
+  header / body ..... header＝開頭的 fonttbl/colortbl/\pard…（樣式表＋段落設定）；
+                      body＝實際文字＋夾在其中的控制字。§2 _body_bounds() 把兩段切開。
+  fonttbl / colortbl  字型表 / 顏色表；\fN＝用第 N 個字型，\cfN＝用第 N 個顏色。
+  \fsN .............. 字級 = N 個「半點」(half-point)，實際 pt = N/2（如 \fs48 = 24pt）。
+  \uNNNN ............ 一個 Unicode 字（signed 16-bit，>U+FFFF 用代理對）；中文多走這個。
+  \ucN / \uc0 ....... 「\u 後面要跳過幾個替代字元」，pro6 預設 \uc1；本程式寫入前置 \uc0
+                      避免吃掉下一個字（見下方核心不變量「\uc0 陷阱」）。
+  \'XX .............. 依碼頁(cp950＝繁中 Big5 等)的「一個位元組」(hex)；舊檔的中文可能走這個。
+  span（區段）....... 某 run 的文字在「原始 rtf 字串」中的絕對 (start,end) 偏移；
+                      逆寫＝只替換這些 span（見核心不變量第 2 條）。
 
 所有編輯只動三個維度：圖層（displayElements 子元素）、位置（RVRect3D）、明文（RTFData）。
 
@@ -193,6 +213,17 @@ class RTFResult:
     runs: list
     def plain(self): return "".join(r.text for r in self.runs)
 
+# RTF body 的逐 token 掃描器（控制字逐項見檔頭「術語②」）。各分支依序：
+#   \uc0          → \u 後跳過 0 個替代字（吃字保護，見「\uc0 陷阱」）
+#   \u(-?\d+)·    → 一個 Unicode 字，後接一個空白（group 1）
+#   \u(-?\d+)\??  → 同上但無空白／帶 ?（group 2）
+#   \'XX          → 碼頁的一個位元組 hex（group 3）
+#   \ + 換行      → 一個換行
+#   \fN \fsN \cfN → 換字型 / 換字級(半點) / 換顏色（group 4/5/6）
+#   \strokecN     → 描邊色（忽略）
+#   \b0\b \i0\i \ulnone\ul → 粗/斜/底線 開關
+#   \[a-zA-Z*]…   → 其他控制字（一律忽略）
+#   group 7       → 一般文字；接著是純換行；group 8＝跳脫的字面 { } \
 _RTF_TOKEN = re.compile(
     r"\\uc0\s?"
     r"|\\u(-?\d+) "

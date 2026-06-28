@@ -71,6 +71,16 @@ pytest                            # 跑全部測試
 python tests/make_fixtures.py     # 需要時重新產生測試資料
 ```
 
+## 交接重點（給下一位工程師）
+
+- **先讀 `app.py` 檔頭**：那裡有完整的 **專有名詞表**（術語①＝pro6/ProPresenter 結構：`document`／`group`／`slide`／`displayElements`／`RTFData`／`run`／`rvXMLIvarName`…；術語②＝RTF：`控制字`／`fonttbl`／`\fsN`／`\uNNNN`／`\uc0`／`span`…）、**核心不變量**、以及 **程式分區 §1–§7**。
+- **黃金守則**：只動三個維度（圖層／位置／明文）；**不要整份 `ET.tostring` round-trip**（會把 `<x></x>` 折成 `<x/>`、ProPresenter 讀不回）；明文逆寫是「定點 span 替換」，沒被動到的 byte 必須完全不變（測試會擋）。
+- **加 / 改模板**：在 `app.py` 的 §TEMPLATES 加一筆 `{name,desc,action}` → §7 dispatch 加 `elif` → `_TPL_CAT` 加分類；處理函式放 §6（吃 `xml_bytes`、回 `(new_bytes, n)`），並在 `tests/test_templates.py` 補測試。
+- **使用說明**：app 內 ⋮ 選單的「About」有每個模板的「功能 / 規則邊界 / 例」完整說明（內容在 `app.py` 的 `_ABOUT_TEXT`）。
+- **部署**：推上 `main` → Streamlit Community Cloud（<https://proparse.streamlit.app/>）自動部署；無其他後端或環境變數。
+- **目標相容環境**：ProPresenter **6.5.3** / macOS（pro6 為主；ProPresenter 7 可向下相容開 pro6）。
+- **改動前後務必 `pytest` 全綠**（目前涵蓋無損逆寫、byte 穩定、每個模板動作、`\uc0` 等編碼回歸）。
+
 ## 檔案地圖
 
 ### 核心程式
