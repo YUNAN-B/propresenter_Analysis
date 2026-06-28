@@ -1715,6 +1715,31 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 /* ⋮ 選單的「About」視窗加寬約兩倍（排除自訂確認框 stDialog，避免確認框被撐大） */
 div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   width:min(1100px,92vw)!important;max-width:min(1100px,92vw)!important;}
+
+/* 手機專用匯出鈕：桌機隱藏（桌機用側欄那顆即可） */
+[class*="st-key-mobile_export"]{display:none;}
+
+/* ── 手機 / 窄螢幕響應式（≤640px）：欄位改直排、留白縮小，維持可上傳/編輯/匯出 ── */
+@media (max-width:640px){
+  /* 手機顯示主畫面那顆匯出鈕 */
+  [class*="st-key-mobile_export"]{display:block!important;}
+  /* 主內容左右留白縮小，編輯區更寬 */
+  .block-container,[data-testid="stMainBlockContainer"]{
+    padding-left:.7rem!important;padding-right:.7rem!important;
+    padding-top:2.6rem!important;padding-bottom:3rem!important;}
+  /* st.columns 在窄螢幕各自佔滿整列＝自動直排（模板 3 欄格、創造左右欄、撰寫頁標頭/控制列等） */
+  [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.45rem!important;}
+  [data-testid="stColumn"],[data-testid="column"]{min-width:100%!important;flex:1 1 100%!important;}
+  /* 但「撰寫頁控制列」(熱鍵＋段落＋刪除) 要維持同一橫列，不要被上面規則拆直 */
+  [class*="st-key-hk_"],[class*="st-key-grppop_"],[class*="st-key-delbtn_"]{
+    min-width:0!important;flex:0 0 auto!important;}
+  /* 分頁標籤縮小、可橫向捲動，避免四個分頁擠爆 */
+  .stTabs [data-baseweb="tab-list"]{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .stTabs [data-baseweb="tab"]{padding:.4rem .9rem!important;font-size:.85rem!important;}
+  /* 標題與大量填入/解析的程式碼字級略縮 */
+  h1{font-size:1.5rem!important;}
+  .stCodeBlock,code,pre{font-size:.7rem!important;}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1935,6 +1960,11 @@ with st.sidebar:
     if st.button("🔄 卡住了？重設", use_container_width=True,
                  help="清除快取與暫存狀態、把檔案還原到剛載入時。操作後若怪怪的、重新整理也沒用時點這個。"):
         _soft_reset()
+
+# 手機專用：主畫面頂端也放一顆匯出鈕（桌機用 CSS 隱藏，免得手機要先開側欄才能下載）
+with st.container(key="mobile_export"):
+    st.download_button(f"⬇ 匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
+                       "application/xml", use_container_width=True, key="dl_mobile")
 
 # ── 操作後的飄出提示（toast 會被 rerun 清掉，故存到 session_state 於下一輪顯示）──
 if st.session_state.get("_tpl_msg"):
