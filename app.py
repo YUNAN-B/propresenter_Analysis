@@ -793,7 +793,7 @@ TEMPLATES: list[dict] = [
      "desc": "把同一圖層內因樣式不同而切開的段落併成單一樣式，並移除換樣式時多出來的換行",
      "action": "merge_runs"},
     {"name": "合併雙排",
-     "desc": "投影片兩兩合併成上下兩行（前張在上、後張在下，逐圖層；圖層數取多），張數約減半",
+     "desc": "每個段落(group)內兩兩合併成上下兩行（前上後下、逐圖層、圖層數取多）；該組奇數時末張保留。第一個段落(標題/無屬段落)不動",
      "action": "merge_rows"},
 ]
 
@@ -1068,24 +1068,20 @@ def _merge_pair_into_first(A, B):
         # 只有 A 有的圖層 → 不動（維持單行）
 
 def _merge_double_rows(xml_bytes: bytes) -> tuple:
-    """把投影片依文件順序兩兩配對合併成「上下雙排」：前張在上行、後張在下行（逐圖層、
-    同 index；圖層數取多），合併後用前張的樣式與位置。張數約除二，奇數最後一張保留原樣。
+    """**段落（group）內**把投影片兩兩合併成「上下雙排」：每組內 (1,2)(3,4)…，前張在上行、
+    後張在下行（逐圖層、同 index；圖層數取多），合併後用前張的樣式與位置；該組張數為奇數時
+    最後一張保留原樣。各段落獨立、不跨組配對。**第一個 group（標題／無屬段落）完全不動。**
     回傳 (new_bytes, n_pairs)。"""
     root, orig = _load_root(xml_bytes)
     gnode=root.find('.//array[@rvXMLIvarName="groups"]')
-    seq=[]   # (slides_array, slide_element) 依文件順序
-    for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
-        sarr=g.find('array[@rvXMLIvarName="slides"]')
-        for sl in (list(sarr) if sarr is not None else []):
-            seq.append((sarr, sl))
+    groups=gnode.findall("RVSlideGrouping") if gnode is not None else []
     n=0
-    for k in range(0, len(seq)-1, 2):                    # (0,1)(2,3)… 落單的最後一張不處理
-        (_, A), (b_arr, B) = seq[k], seq[k+1]
-        _merge_pair_into_first(A, B)
-        b_arr.remove(B); n+=1
-    for g in list(gnode.findall("RVSlideGrouping") if gnode is not None else []):
-        sarr=g.find('array[@rvXMLIvarName="slides"]')    # 移除因此變空的群組
-        if sarr is not None and len(list(sarr))==0: gnode.remove(g)
+    for g in groups[1:]:                                 # 跳過第一組（標題／無屬段落）
+        sarr=g.find('array[@rvXMLIvarName="slides"]')
+        slides=list(sarr if sarr is not None else [])
+        for k in range(0, len(slides)-1, 2):            # 組內 (0,1)(2,3)… 落單的最後一張不處理
+            _merge_pair_into_first(slides[k], slides[k+1])
+            sarr.remove(slides[k+1]); n+=1
     return _xml_to_bytes(root, orig), n
 
 def _apply_tc2sc(xml_bytes: bytes, reverse: bool=False) -> tuple:

@@ -335,21 +335,40 @@ def test_load_new_doc_fk_uses_original_size(app):
     assert app.st.session_state["_fk"] == ("song.pro6", len(raw))   # 用原始長度
     assert app.st.session_state["xml_content"] == app._normalize_preset_groups(raw)
 
+def _regroup(app, b, parts):
+    """把單組 deck 依序切成多個 group：parts=[(name, size)…]（用 _set_group_fill）。"""
+    colors = ["#8E44AD", "#3B6FD4", "#D0021B", "#2E8B57", "#F5C518"]
+    b, _ = app._set_group_fill(b, 1, parts[0][0], colors[0])
+    num = 1 + parts[0][1]
+    for i, (name, size) in enumerate(parts[1:], 1):
+        b, _ = app._set_group_fill(b, num, name, colors[i % len(colors)])
+        num += size
+    return b
+
 def test_merge_double_rows(app):
-    # 例①：6 張單層 → 3 張，每層兩行（前上、後下）
-    b = app._build_pro6_structured("\n\n".join(f"句{i}" for i in "一二三四五六"), "空行", "空行")
+    # 段落內兩兩合併：標題(2)／Verse(3)／Chorus(3)；第一組(標題)不動、各組獨立、奇數末張留
+    b = app._build_pro6_structured("\n\n".join(f"S{i}" for i in range(1, 9)), "空行", "空行")
+    b = _regroup(app, b, [("標題", 2), ("Verse", 3), ("Chorus", 3)])
     nb, n = app._merge_double_rows(b)
-    assert n == 3 and _ok(nb)
+    assert n == 2 and _ok(nb)
     texts = ["".join(t for _, _, t, _ in tl) for _, _, tl in _layers(app, nb)]
-    assert texts == ["句一\n句二", "句三\n句四", "句五\n句六"]
-    # 例②：圖層數 2,3 → 合併成 3 層，最後一層只有一行
-    b2 = app._build_pro6_structured("行1\n行2\n\n行A\n行B\n行C", "空行", "換行")
-    nb2, n2 = app._merge_double_rows(b2)
-    rows = _layers(app, nb2)
-    assert len(rows) == 1 and n2 == 1
-    layer_texts = [t for _, _, t, _ in rows[0][2]]
+    # 標題 S1,S2 原封不動；Verse (S3,S4) 合併、S5 落單；Chorus (S6,S7) 合併、S8 落單
+    assert texts == ["S1", "S2", "S3\nS4", "S5", "S6\nS7", "S8"]
+    assert _groups(app, nb) == [("標題", 2), ("Verse", 2), ("Chorus", 2)]
+
+def test_merge_double_rows_layer_count(app):
+    # 非首組內，兩張圖層數 2,3 → 合併成 3 層、末層單行
+    b = app._build_pro6_structured("標題\n\n行1\n行2\n\n行A\n行B\n行C", "空行", "換行")
+    b = _regroup(app, b, [("標題", 1), ("Verse", 2)])
+    nb, n = app._merge_double_rows(b)
+    rows = _layers(app, nb)
+    assert n == 1 and len(rows) == 2                          # 標題 + 合併後一張
+    layer_texts = [t for _, _, t, _ in rows[1][2]]
     assert layer_texts == ["行1\n行A", "行2\n行B", "行C"]      # 圖層數取多、末層單行
-    # 奇數最後一張保留
-    b3 = app._build_pro6_structured("a\n\nb\n\nc", "空行", "空行")
-    nb3, n3 = app._merge_double_rows(b3)
-    assert n3 == 1 and len(_layers(app, nb3)) == 2            # (a+b) 合併、c 留原樣
+
+def test_merge_double_rows_skips_lone_first_group(app):
+    # 只有一個 group（無屬段落/標題）→ 完全不動
+    b = app._build_pro6_structured("一\n\n二\n\n三\n\n四", "空行", "空行")
+    nb, n = app._merge_double_rows(b)
+    texts = ["".join(t for _, _, t, _ in tl) for _, _, tl in _layers(app, nb)]
+    assert n == 0 and texts == ["一", "二", "三", "四"]       # 第一組不動 → 沒有任何合併
