@@ -1746,7 +1746,10 @@ def _create_ui():
         right_src=txt2 or ""
 
     st.caption("樣式固定：PingFangTC-Medium · 65pt · 白 · 1920×1080 置中。")
-    _name=_name_from_text(left_src)+".pro6"      # 預設檔名＝首行內容
+    _base=_name_from_text(left_src)              # 預設檔名＝首行內容
+    if not (_base.startswith("《") and _base.endswith("》")):   # 自動加書名號（已包則不重複）
+        _base=f"《{_base}》"
+    _name=_base+".pro6"
 
     if right_src is None:                       # 單欄：依 page_by/layer_by 分割
         n=len(_split_pages(left_src, page_by or "空行")) if left_src.strip() else 0
