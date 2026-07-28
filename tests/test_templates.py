@@ -372,3 +372,15 @@ def test_merge_double_rows_skips_lone_first_group(app):
     nb, n = app._merge_double_rows(b)
     texts = ["".join(t for _, _, t, _ in tl) for _, _, tl in _layers(app, nb)]
     assert n == 0 and texts == ["一", "二", "三", "四"]       # 第一組不動 → 沒有任何合併
+
+def test_batch_rename_layers(app, sample):
+    nb, n = app._batch_rename_layers(sample, ["主歌詞", "副歌詞"])
+    assert n >= 1 and _ok(nb)
+    _, gs = app._parse_xml(nb)
+    for g in gs:
+        for s in g["slides"]:
+            if len(s["layers"]) >= 1:
+                assert s["layers"][0]["displayName"] == "主歌詞"
+            if len(s["layers"]) >= 2:
+                assert s["layers"][1]["displayName"] == "副歌詞"
+

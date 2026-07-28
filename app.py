@@ -745,7 +745,8 @@ def _parse_xml(xml_bytes: bytes):
                             runs=parse_rtf(rtf).runs                              # 顯示/逐段轉換用（濾空白段）
                             full=_drop_style_break_nl(parse_rtf(rtf, keep_empty=True).runs)  # 撰寫頁整層文字
                         except: pass
-                layers.append(dict(idx=li, type=el.tag, pos=pos, runs=runs, full=full))
+                layers.append(dict(idx=li, type=el.tag, pos=pos, runs=runs, full=full,
+                                    displayName=el.get("displayName","")))
             slides.append(dict(
                 num=snum, label=sa.get("label",""), hotKey=sa.get("hotKey",""),
                 bg=_rgba_hex(sa.get("backgroundColor","0 0 0 1")), layers=layers))
@@ -826,6 +827,9 @@ TEMPLATES: list[dict] = [
     {"name": "合併雙排",
      "desc": "每個段落(group)內兩兩合併成上下兩行（前上後下、逐圖層、圖層數取多）；該組奇數時末張保留。第一個段落(標題/無屬段落)不動",
      "action": "merge_rows"},
+    {"name": "批量修改圖層名稱",
+     "desc": "依圖層順序批次將全部投影片的指定圖層命名（每行對應第 1、2、3… 個圖層名稱）",
+     "action": "batch_rename_layers"},
 ]
 
 
@@ -1562,6 +1566,31 @@ def _set_slide_hotkey(xml_bytes: bytes, num: int, key: str) -> tuple:
     target.set("hotKey", key)
     return _xml_to_bytes(root, orig), None
 
+def _set_layer_displayname(xml_bytes: bytes, gi, si, li, name: str) -> tuple:
+    """設定指定圖層的 displayName 屬性。回傳 (new_bytes, err)。"""
+    root, orig, el = _get_layer_el(xml_bytes, gi, si, li)
+    old = el.get("displayName", "")
+    if name == old: return xml_bytes, None
+    el.set("displayName", name)
+    return _xml_to_bytes(root, orig), None
+
+def _batch_rename_layers(xml_bytes: bytes, names: list[str]) -> tuple:
+    """按圖層索引 (0, 1, 2...) 批次修改每張投影片的圖層 displayName 屬性。
+    names[i] 為第 i+1 個圖層的新名稱（空字串或未填則保持原樣）。
+    回傳 (new_bytes, n_changed)。"""
+    root, orig = _load_root(xml_bytes)
+    n = 0
+    clean_names = [nm.strip() for nm in names]
+    for sl, elems in _iter_slides(root):
+        if elems is None: continue
+        for li, el in enumerate(list(elems)):
+            if li < len(clean_names) and clean_names[li]:
+                new_name = clean_names[li]
+                if el.get("displayName", "") != new_name:
+                    el.set("displayName", new_name)
+                    n += 1
+    return _xml_to_bytes(root, orig), n
+
 def _normalize_preset_groups(xml_bytes: bytes) -> bytes:
     """匯入時用：群組名稱若已是預設類型（Verse/Chorus…），把它的顏色設成綁定色，
     讓匯入檔的群組直接對齊預設狀態。沒有相符的群組則原樣回傳（byte 不變）。"""
@@ -1672,6 +1701,11 @@ ProPresenter 6（.pro6）投影片的批次檢視與編輯工具，特別適合�
 - **規則邊界**：每組內 (1,2)(3,4)…、不跨段落配對；逐圖層同位置合併、圖層數取多；用前張的樣式與位置；該組張數為奇數時最後一張保留原樣。**第一個段落（標題／無屬段落）完全不動**（若整份只有一個段落，等於不動）。
 - **例**：標題不動；Verse 5 張 →(1,2)(3,4) 加單獨的第 5 張；Chorus 4 張 →(1,2)(3,4)。
 
+**批量修改圖層名稱** — 依圖層順序批次將全部投影片的指定圖層命名。
+
+- **規則**：輸入多行文字，第 1 行對應第 1 個圖層，第 2 行對應第 2 個圖層... 留空者不修改。
+- **例**：輸入「中文\n英文」→ 每張投影片的第 1 圖層改名為「中文」、第 2 圖層改名為「英文」。
+
 ---
 
 ### 統整
@@ -1740,6 +1774,8 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 [class*="st-key-grppop_"]{flex:0 0 auto!important;}
 [class*="st-key-grppop_"]>button{white-space:nowrap;}
 [class*="st-key-grpbtn_"] button{padding:.1rem .5rem;min-height:0;}
+/* 圖層命名：緊湊單行輸入框 */
+[class*="st-key-ln_"] input{font-size:.78rem;padding:.15rem .4rem;height:1.8rem;}
 /* 刪除鈕：與熱鍵同尺寸的正方形 */
 [class*="st-key-delbtn_"]{flex:0 0 auto!important;}
 [class*="st-key-delbtn_"] button{width:2.6rem!important;height:2.6rem!important;padding:0;min-height:0;}
@@ -1764,6 +1800,7 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   /* 但「撰寫頁控制列」(熱鍵＋段落＋刪除) 要維持同一橫列，不要被上面規則拆直 */
   [class*="st-key-hk_"],[class*="st-key-grppop_"],[class*="st-key-delbtn_"]{
     min-width:0!important;flex:0 0 auto!important;}
+  [class*="st-key-ln_"] input{font-size:.72rem;}
   /* 分頁標籤縮小、可橫向捲動，避免四個分頁擠爆 */
   .stTabs [data-baseweb="tab-list"]{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .stTabs [data-baseweb="tab"]{padding:.4rem .9rem!important;font-size:.85rem!important;}
@@ -1785,7 +1822,7 @@ def _soft_reset():
     try: st.cache_data.clear()
     except Exception: pass
     ss=st.session_state
-    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","_"))]:
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_","_"))]:
         ss.pop(k, None)                          # 清掉輸入框快取與所有 _xxx 暫態旗標
     if ss.get("xml_original") is not None:
         ss["xml_content"]=ss["xml_original"]; ss["undo_stack"]=[]; ss["history"]=[]
@@ -1802,7 +1839,7 @@ def _commit_change(tpl_name, nb, cnt, msg):
     st.session_state["xml_content"]=nb
     st.session_state["history"].append(f"{tpl_name}({cnt})")
     for kk in [kk for kk in st.session_state
-               if kk.startswith(("txt_","empty_","grp_","hk_"))]:
+               if kk.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
         st.session_state.pop(kk, None)
     st.session_state["_tpl_msg"]=msg          # 下一輪以 st.toast 飄出
     st.rerun()
@@ -1837,7 +1874,7 @@ def _load_new_doc(raw, name):
     ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]
     ss["export_name"]=name.rsplit(".",1)[0]
     # 清掉舊檔的撰寫頁輸入框快取，否則新檔會沿用同 key 顯示成舊內容
-    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_"))]:
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
         ss.pop(k, None)
 
 def _request_new(xml, name):
@@ -1870,7 +1907,7 @@ def _del_slide_dialog(num):
         else:
             _push_undo(); st.session_state["xml_content"]=nb
             st.session_state["history"].append(f"刪除S{num}")
-            for k in [k for k in st.session_state if k.startswith(("txt_","empty_","hk_"))]:
+            for k in [k for k in st.session_state if k.startswith(("txt_","empty_","hk_","ln_"))]:
                 st.session_state.pop(k, None)
         st.rerun()
     if c2.button("取消", key=f"delcancel_{num}", use_container_width=True):
@@ -1975,7 +2012,7 @@ with st.sidebar:
                  disabled=not _undo):
         st.session_state["xml_content"]=_undo.pop()
         if st.session_state.get("history"): st.session_state["history"].pop()
-        for k in [k for k in st.session_state if k.startswith(("txt_","empty_","grp_","hk_"))]:
+        for k in [k for k in st.session_state if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
             st.session_state.pop(k, None)
         st.rerun()
     st.divider()
@@ -2045,6 +2082,7 @@ with tab_tpl:
             "tc2sc":"轉換","pinyin":"轉換",
             "reverse_layers":"操作","split_lines":"操作","layers_to_slides":"操作",
             "add_layer":"操作","merge_runs":"操作","merge_rows":"操作",
+            "batch_rename_layers":"操作",
         }
         def _tpl_cat(t):
             return t.get("cat") or (_TPL_CAT.get(t.get("action"),"其他")
@@ -2082,6 +2120,12 @@ with tab_tpl:
                 elif action=="keep_first":
                     st.number_input("保留前幾個圖層", min_value=1, max_value=50,
                                     value=2, step=1, key=f"keepn_{ti}")
+                elif action=="batch_rename_layers":
+                    st.text_area("各圖層名稱（每行對應第 1, 2, 3... 個圖層）",
+                                 value="中文\n英文",
+                                 key=f"bname_{ti}",
+                                 height=90,
+                                 help="第 1 行為第 1 個圖層名稱，第 2 行為第 2 個圖層名稱... 留空表示不修改")
 
                 def _commit(nb, cnt, msg):
                     _commit_change(tpl["name"], nb, cnt, msg)
@@ -2123,6 +2167,11 @@ with tab_tpl:
                             nb,n=_merge_layer_runs(src); _commit(nb,n,f"已合併 {n} 個圖層的段落")
                         elif action=="merge_rows":
                             nb,n=_merge_double_rows(src); _commit(nb,n,f"已兩兩合併 {n} 組（上下雙排）")
+                        elif action=="batch_rename_layers":
+                            raw_bname=st.session_state.get(f"bname_{ti}", "")
+                            bnames=raw_bname.split("\n")
+                            nb,n=_batch_rename_layers(src, bnames)
+                            _commit(nb,n,f"已修改 {n} 個圖層名稱")
                         elif action=="tc2sc":
                             rev=st.session_state.get(f"rev_{ti}", False)
                             nb,n,errs=_apply_tc2sc(src, rev)
@@ -2195,8 +2244,10 @@ def _write_tab():
     _layer_counts = "".join(str(len(s["layers"])) for s in _slides_flat)
     st.markdown(
         '<div style="font-family:monospace;font-size:.9rem;color:#999;letter-spacing:2px;'
-        f'word-break:break-all;margin:.2rem 0 .6rem">圖層數：{_layer_counts}</div>',
+        f'word-break:break-all;margin:.2rem 0 .4rem">圖層數：{_layer_counts}</div>',
         unsafe_allow_html=True)
+    show_detail = st.toggle("開啟詳細編輯（設定段落 Group、熱鍵 Hotkey、圖層名稱等資訊）",
+                             key="show_write_detail")
     st.markdown("---")
 
     if st.session_state.get("_text_err"):
@@ -2215,6 +2266,18 @@ def _write_tab():
         st.session_state["xml_content"]=nb
         st.session_state.pop(key, None)
         st.session_state["history"].append(f"文字G{gi}S{si}L{li}")
+
+    def _save_layer_name(gi, si, li, key):
+        """圖層命名失焦自動儲存：把 displayName 寫回 XML 屬性。"""
+        name=st.session_state.get(key,"").strip()
+        xml=st.session_state["xml_content"]
+        nb,err=_set_layer_displayname(xml, gi, si, li, name)
+        if err: st.session_state["_text_err"]=err; return
+        if nb is xml: return                         # 無變動
+        _push_undo()
+        st.session_state["xml_content"]=nb
+        st.session_state.pop(key, None)
+        st.session_state["history"].append(f"命名G{gi}S{si}L{li}")
 
     def _set_group(num, name, color):
         """按了段落類型按鈕：從這張往後（同組連續範圍）整段套用名稱+顏色，整頁刷新。
@@ -2240,7 +2303,7 @@ def _write_tab():
         if owner:
             st.session_state["_hk_msg"]=f"熱鍵「{key}」原本在 Slide {owner}，已覆蓋改設到 Slide {num}"
         st.session_state["history"].append(f"熱鍵S{num}")
-        for k in [k for k in st.session_state if k.startswith("hk_")]:
+        for k in [k for k in st.session_state if k.startswith(("hk_","ln_"))]:
             st.session_state.pop(k, None)
 
     def _swatch(hx):
@@ -2256,30 +2319,37 @@ def _write_tab():
             si_orig=next(i for i,s in enumerate(g["slides"]) if s["num"]==slide["num"])
             num=slide["num"]
             lbl=slide["label"] or f"Slide {num}"
-            # slide 標頭：外層 [1,3] 與下方編輯列同切，使右側控制區左緣對齊文字輸入框；
-            # 控制區＝零間距水平容器：熱鍵 ＋ 段落 popover ＋ 刪除鈕(緊貼相鄰)
-            _lab,_ctrl=st.columns([1,3], vertical_alignment="center")
-            _lab.markdown(f"`Slide {num}` {lbl}")
-            with _ctrl.container(horizontal=True, gap="xsmall", vertical_alignment="center"):
-                if f"hk_{num}" not in st.session_state:
-                    st.session_state[f"hk_{num}"]=slide["hotKey"]
-                st.text_input("熱鍵", key=f"hk_{num}", max_chars=1, autocomplete="off",
-                              placeholder="鍵", label_visibility="collapsed",
-                              on_change=_save_hotkey, args=(num,))
+            if show_detail:
+                # 詳細編輯開啟：顯示 熱鍵 ＋ 段落 popover ＋ 刪除鈕
+                _lab,_ctrl=st.columns([1,3], vertical_alignment="center")
+                _lab.markdown(f"`Slide {num}` {lbl}")
+                with _ctrl.container(horizontal=True, gap="xsmall", vertical_alignment="center"):
+                    if f"hk_{num}" not in st.session_state:
+                        st.session_state[f"hk_{num}"]=slide["hotKey"]
+                    st.text_input("熱鍵", key=f"hk_{num}", max_chars=1, autocomplete="off",
+                                  placeholder="鍵", label_visibility="collapsed",
+                                  on_change=_save_hotkey, args=(num,))
+                    _cur=g["name"]
+                    _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur if _cur in _GROUP_EMOJI else '段落'}"
+                    with st.popover(_curlabel, key=f"grppop_{num}"):
+                        for _gname,_ghex in _GROUP_PRESETS:
+                            if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
+                                         key=f"grpbtn_{num}_{_gname}", use_container_width=True):
+                                _set_group(num, _gname, _ghex)
+                    if st.button("🗑", key=f"delbtn_{num}", help="刪除這張投影片"):
+                        st.session_state["_del_ask"]=num; st.rerun()
+            else:
                 _cur=g["name"]
-                _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur if _cur in _GROUP_EMOJI else '段落'}"
-                with st.popover(_curlabel, key=f"grppop_{num}"):
-                    for _gname,_ghex in _GROUP_PRESETS:
-                        if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
-                                     key=f"grpbtn_{num}_{_gname}", use_container_width=True):
-                            _set_group(num, _gname, _ghex)
-                if st.button("🗑", key=f"delbtn_{num}", help="刪除這張投影片"):
-                    st.session_state["_del_ask"]=num; st.rerun()
+                _curlabel=f"{_GROUP_EMOJI.get(_cur,'⚫')} {_cur}" if _cur else ""
+                _hklabel=f" ⌨️`{slide['hotKey']}`" if slide["hotKey"] else ""
+                st.markdown(f"`Slide {num}` {lbl}　<span style='font-size:.8rem;color:#666'>{_curlabel}{_hklabel}</span>", unsafe_allow_html=True)
+
             for layer in [l for l in slide["layers"] if l["type"]=="RVTextElement"]:
                 p=layer["pos"]; runs=layer["runs"]
-                # full＝整層文字，已移除「換樣式時多出來的換行」（見 _drop_style_break_nl）
                 full=layer.get("full","")
-                if runs:                                  # 首字（第一段）樣式提示
+                _dn=layer.get("displayName","")
+                _dn_str=f" 「{_dn}」" if _dn else ""
+                if runs:
                     r0=runs[0]
                     sz=f"{r0.font_size_pt:g}pt" if r0.font_size_pt else "?"
                     styles=[s for s,v in [("粗",r0.bold),("斜",r0.italic),("底線",r0.underline)] if v]
@@ -2287,11 +2357,29 @@ def _write_tab():
                           + ("　"+"・".join(styles) if styles else ""))
                 else:
                     hint='　<span style="color:#c0392b">空圖層（可直接輸入）</span>'
-                st.markdown(
-                    f'<div style="color:#444;font-size:.74rem;font-weight:600;margin:.5rem 0 .2rem">'
-                    f'圖層 L{layer["idx"]}<span style="font-weight:400;color:#888">　'
-                    f'x={p["x"]} y={p["y"]} w={p["w"]} h={p["h"]}{hint}</span></div>',
-                    unsafe_allow_html=True)
+
+                if show_detail:
+                    _lnk=f"ln_{gi}_{si_orig}_{layer['idx']}"
+                    _ln_col, _info_col = st.columns([1,3], vertical_alignment="center")
+                    with _ln_col:
+                        if _lnk not in st.session_state: st.session_state[_lnk]=_dn
+                        st.text_input(f"名稱 L{layer['idx']}", key=_lnk,
+                                     placeholder=f"L{layer['idx']} 命名",
+                                     label_visibility="collapsed",
+                                     on_change=_save_layer_name,
+                                     args=(gi, si_orig, layer["idx"], _lnk))
+                    _info_col.markdown(
+                        f'<div style="color:#444;font-size:.74rem;font-weight:600">'
+                        f'圖層 L{layer["idx"]}{_dn_str}<span style="font-weight:400;color:#888">　'
+                        f'x={p["x"]} y={p["y"]} w={p["w"]} h={p["h"]}{hint}</span></div>',
+                        unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f'<div style="color:#444;font-size:.74rem;font-weight:600;margin:.4rem 0 .2rem">'
+                        f'圖層 L{layer["idx"]}{_dn_str}<span style="font-weight:400;color:#888">　'
+                        f'x={p["x"]} y={p["y"]} w={p["w"]} h={p["h"]}{hint}</span></div>',
+                        unsafe_allow_html=True)
+
                 k=f"txt_{gi}_{si_orig}_{layer['idx']}"
                 if k not in st.session_state: st.session_state[k]=full
                 _h=max(68, min(240, 26*(full.count("\n")+1)+16))
