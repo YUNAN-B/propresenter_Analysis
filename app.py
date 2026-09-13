@@ -2249,16 +2249,16 @@ with st.sidebar:
     # key 綁 _fk＋目前值：檔案或值一變＝全新 widget，杜絕前端殘留的舊編輯狀態
     # 把舊值寫進新檔（同先前換檔覆寫 bug，data_editor 的編輯疊層也適用）。
     _dk=st.session_state.get("_fk")
-    _ed=st.data_editor(
+    _ed=st.data_editor(                      # 欄名留空＝不顯示表頭文字（表頭為 canvas，CSS 藏不掉）
         pd.DataFrame([("標題",doc_meta["title"]),
                       ("寬",str(doc_meta["w"])),("高",str(doc_meta["h"]))],
-                     columns=["項目","值"]),
-        hide_index=True, use_container_width=True, disabled=["項目"],
-        column_config={"項目": st.column_config.Column(width="small")},
+                     columns=["", " "]),
+        hide_index=True, use_container_width=True, disabled=[""],
+        column_config={"": st.column_config.Column(width="small")},
         key=f"doc_ed_{_dk}_{doc_meta['title']}_{doc_meta['w']}x{doc_meta['h']}")
-    _nt=str(_ed.iloc[0]["值"] or "").strip()
+    _nt=str(_ed.iloc[0,1] or "").strip()
     try:
-        _nw=int(str(_ed.iloc[1]["值"]).strip()); _nh=int(str(_ed.iloc[2]["值"]).strip())
+        _nw=int(str(_ed.iloc[1,1]).strip()); _nh=int(str(_ed.iloc[2,1]).strip())
         if _nw<1 or _nh<1: raise ValueError
     except ValueError:
         _nw=_nh=None; st.toast("寬/高要是正整數", icon="⚠️")
