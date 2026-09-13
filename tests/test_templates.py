@@ -333,7 +333,8 @@ def test_load_new_doc_fk_uses_original_size(app):
     app.st.session_state.clear()
     app._load_new_doc(raw, "song.pro6")
     assert app.st.session_state["_fk"] == ("song.pro6", len(raw))   # 用原始長度
-    assert app.st.session_state["xml_content"] == app._normalize_preset_groups(raw)
+    assert app.st.session_state["xml_content"] == app._default_title(
+        app._normalize_preset_groups(raw), "song")   # 載入管線：正規化→預設標題
 
 def _regroup(app, b, parts):
     """把單組 deck 依序切成多個 group：parts=[(name, size)…]（用 _set_group_fill）。"""

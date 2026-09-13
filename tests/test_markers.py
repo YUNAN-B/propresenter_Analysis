@@ -71,3 +71,37 @@ def test_build_plain_still_single_group(app):
 # ── 檔名推導 ───────────────────────────────────────────────────
 def test_name_skips_marker_lines(app):
     assert app._name_from_text("[主歌]\n真正的第一句") == "真正的第一句"
+
+
+# ── 文件屬性：標題、尺寸、側欄摘要 ─────────────────────────────
+def test_default_and_set_title(app):
+    b = app._build_pro6_structured("第一張")          # 創造：CCLISongTitle=""
+    b2 = app._default_title(b, "《恩典之路》")
+    assert ET.fromstring(b2.decode()).get("CCLISongTitle") == "《恩典之路》"
+    # 已有標題不覆蓋
+    assert app._default_title(b2, "別的") == b2
+    b3 = app._set_title(b2, "新標題")
+    assert ET.fromstring(b3.decode()).get("CCLISongTitle") == "新標題" and _ok(b3)
+
+def test_resize_doc(app):
+    b = app._build_pro6_structured("上層\n下層")       # 一張兩圖層，fs=130
+    nb, n = app._resize_doc(b, 1280, 720)
+    root = ET.fromstring(nb.decode())
+    assert root.get("width") == "1280" and root.get("height") == "720"
+    # 位置等比：第二個圖層 y=540→360、w=1920→1280、h=540→360
+    pos = [app._parse_pos(r.text) for r in root.iter("RVRect3D")]
+    assert pos[1] == {"x": 0, "y": 360, "z": 0, "w": 1280, "h": 360}
+    # 字級 ×2/3：fs130 → 87（43.5pt）
+    assert n == 2
+    runs = app.parse_rtf_b64(root.find(".//NSString").text).runs
+    assert runs[0].font_size_pt == 43.5
+    assert _ok(nb)
+
+def test_doc_summary_layers(app):
+    dec = {"主歌": "Verse", "副歌": "Chorus", "x2": "__lyric__",
+           "間奏": "__literal__", "Chorus": "Chorus"}
+    meta, gs = app._doc_summary(app._build_pro6_marked(SRC, dec))
+    assert meta["w"] == 1920 and meta["h"] == 1080
+    # Verse：1張(空行換頁)2圖層；Chorus：1張3圖層(三句/[x2]/四句)；Chorus：1張1圖層
+    assert [(g["name"], g["n"], g["layers"]) for g in gs] == [
+        ("Verse", 1, [2]), ("Chorus", 1, [3]), ("Chorus", 1, [1])]

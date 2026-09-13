@@ -768,7 +768,8 @@ def _doc_summary(xml_bytes: bytes):
     root=ET.fromstring(xml_bytes.decode("utf-8")); doc=root.attrib
     meta={
         "title":     doc.get("CCLISongTitle",""),
-        "res":       f"{doc.get('width','?')} × {doc.get('height','?')}",
+        "w":         int(float(doc.get("width",1920))),
+        "h":         int(float(doc.get("height",1080))),
         "author":    doc.get("CCLIAuthor",""),
         "publisher": doc.get("CCLIPublisher",""),
     }
@@ -776,12 +777,54 @@ def _doc_summary(xml_bytes: bytes):
     groups=[]
     for g in (gnode.findall("RVSlideGrouping") if gnode is not None else []):
         snode=g.find('array[@rvXMLIvarName="slides"]')
+        slides=list(snode) if snode is not None else []
         groups.append({
             "name":  g.get("name","") or "(title)",
-            "n":     len(snode) if snode is not None else 0,
+            "n":     len(slides),
             "color": _rgba_hex(g.get("color","0 0 0 0")),
+            # 每張的文字圖層數，由左而右（側欄表格「圖層數」欄用）
+            "layers":[len(s.findall(".//RVTextElement")) for s in slides],
         })
     return meta, groups
+
+
+# ── 文件屬性：標題與尺寸（側欄編輯用）───────────────────────────
+def _default_title(xml_bytes: bytes, stem: str) -> bytes:
+    """CCLISongTitle 空白時預設為檔名（去副檔名）；已有標題則原樣返回。
+    創造產生與上傳的檔載入時都走這裡，讓側欄「標題」永遠有值。"""
+    root, orig = _load_root(xml_bytes)
+    if (root.get("CCLISongTitle") or "").strip(): return xml_bytes
+    root.set("CCLISongTitle", stem)
+    return _xml_to_bytes(root, orig)
+
+def _set_title(xml_bytes: bytes, title: str) -> bytes:
+    root, orig = _load_root(xml_bytes)
+    root.set("CCLISongTitle", title)
+    return _xml_to_bytes(root, orig)
+
+def _resize_doc(xml_bytes: bytes, new_w: int, new_h: int) -> tuple:
+    """改文件尺寸：width/height 屬性、所有 RVRect3D 位置依 x/y 軸各自等比縮放，
+    各文字圖層 RTF 的 \\fsN 字級乘上寬高縮放係數的較小者（避免文字爆框）。
+    RTF 以 latin-1 解碼做純正則替換（位元組無損）。回傳 (new_bytes, n_scaled)。"""
+    root, orig = _load_root(xml_bytes)
+    ow, oh = float(root.get("width", 1920)), float(root.get("height", 1080))
+    fx, fy = new_w/ow, new_h/oh; ff = min(fx, fy)
+    root.set("width", str(int(new_w))); root.set("height", str(int(new_h)))
+    for r3 in root.iter("RVRect3D"):
+        nums = re.findall(r"[-\d.]+", r3.text or "")
+        if len(nums) == 5:
+            x, y, z, w, h = (float(v) for v in nums)
+            r3.text = f"{{{round(x*fx)} {round(y*fy)} {round(z)} {round(w*fx)} {round(h*fy)}}}"
+    n = 0
+    for ns in root.iter("NSString"):
+        if ns.get("rvXMLIvarName") != "RTFData" or not (ns.text or "").strip(): continue
+        try: rtf = base64.b64decode(ns.text).decode("latin-1")
+        except Exception: continue
+        new_rtf = re.sub(r"\\fs(\d+)",
+                         lambda m: "\\fs"+str(max(1, round(int(m.group(1))*ff))), rtf)
+        if new_rtf != rtf:
+            ns.text = base64.b64encode(new_rtf.encode("latin-1")).decode("ascii"); n += 1
+    return _xml_to_bytes(root, orig), n
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1979,7 +2022,7 @@ def _soft_reset():
     try: st.cache_data.clear()
     except Exception: pass
     ss=st.session_state
-    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_","_"))]:
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_","_"))]:
         ss.pop(k, None)                          # 清掉輸入框快取與所有 _xxx 暫態旗標
     if ss.get("xml_original") is not None:
         ss["xml_content"]=ss["xml_original"]; ss["undo_stack"]=[]; ss["history"]=[]
@@ -2027,11 +2070,14 @@ def _load_new_doc(raw, name):
     # 匯入時：群組名稱若已是預設類型，把顏色對齊綁定狀態
     try: raw=_normalize_preset_groups(raw)
     except Exception: pass
+    try: raw=_default_title(raw, name.rsplit(".",1)[0])   # 無標題→預設檔名
+    except Exception: pass
     ss["xml_original"]=raw; ss["xml_content"]=raw
     ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]
     ss["export_name"]=name.rsplit(".",1)[0]
     # 清掉舊檔的撰寫頁輸入框快取，否則新檔會沿用同 key 顯示成舊內容
-    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
+    # （doc_ = 側欄標題/尺寸輸入框，須跟著新檔重設）
+    for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
         ss.pop(k, None)
 
 def _request_new(xml, name):
@@ -2197,14 +2243,29 @@ except Exception:
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(f"**{doc_meta['title'] or '(無標題)'}**")
-    # 文件資訊用小灰字（caption）一行一行列，群組以 • 列點。
-    _info=[doc_meta["res"]]
-    if doc_meta["author"]:    _info.append(f"作者：{doc_meta['author']}")
-    if doc_meta["publisher"]: _info.append(f"出版：{doc_meta['publisher']}")
-    for g in _summary_groups:
-        _info.append(f"• {g['name']}　{g['n']} slides　color={g['color']}")
-    st.caption("<br>".join(_info), unsafe_allow_html=True)
+    # 標題：載入時已預設＝檔名（_default_title），此處可改、寫回 CCLISongTitle
+    _t=st.text_input("標題", value=doc_meta["title"], key="doc_title")
+    if _t.strip() and _t.strip()!=doc_meta["title"]:
+        _push_undo()
+        st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
+        st.session_state["history"].append("標題"); st.rerun()
+    # 尺寸：改寬/高＝圖層位置與字級等比縮放（見 _resize_doc）
+    _c1,_c2=st.columns(2)
+    _w=_c1.number_input("寬", min_value=1, value=doc_meta["w"], key="doc_w")
+    _h=_c2.number_input("高", min_value=1, value=doc_meta["h"], key="doc_h")
+    if (_w,_h)!=(doc_meta["w"],doc_meta["h"]):
+        _push_undo()
+        st.session_state["xml_content"]=_resize_doc(xml_bytes,_w,_h)[0]
+        st.session_state["history"].append(f"尺寸{_w}×{_h}"); st.rerun()
+    # 段落表格：段落｜張數｜圖層數（每張的文字圖層數由左而右串接，如 22222）
+    if _summary_groups:
+        _rows=["|段落|張數|圖層數|","|:--|--:|:--|"]
+        for g in _summary_groups:
+            _dot=(f"<span style='color:{g['color']}'>●</span> "
+                  if g["color"]!="transparent" else "")
+            _sep="" if all(c<10 for c in g["layers"]) else ","
+            _rows.append(f"|{_dot}{g['name']}|{g['n']}|{_sep.join(map(str,g['layers']))}|")
+        st.markdown("\n".join(_rows), unsafe_allow_html=True)
     st.divider()
     if st.session_state.get("history"):
         st.caption("→ ".join(st.session_state["history"][-6:]))
@@ -2213,7 +2274,8 @@ with st.sidebar:
                  disabled=not _undo):
         st.session_state["xml_content"]=zlib.decompress(_undo.pop())
         if st.session_state.get("history"): st.session_state["history"].pop()
-        for k in [k for k in st.session_state if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
+        for k in [k for k in st.session_state
+                  if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
             st.session_state.pop(k, None)
         st.rerun()
     st.divider()
