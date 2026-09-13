@@ -1385,7 +1385,21 @@ def _slide_element(elements):
             f'<array rvXMLIvarName="displayElements">{"".join(elements)}</array>'
             '</RVDisplaySlide>')
 
+def _xml_attr(s: str) -> str:
+    """使用者輸入 → XML 屬性值（跳脫 & < > "，群組名含特殊字元才不會壞檔）。"""
+    return (s.replace("&","&amp;").replace("<","&lt;")
+             .replace(">","&gt;").replace('"',"&quot;"))
+
 def _doc_wrapper(slides):
+    """單一無名群組（原介面；多群組見 _doc_wrapper_groups）。"""
+    return _doc_wrapper_groups([("", "0 0 0 0", slides)])
+
+def _doc_wrapper_groups(groups):
+    """groups=[(名稱, ProPresenter 顏色字串, [slide 元素字串]), ...] → 完整 .pro6 bytes。"""
+    gs="".join(
+        f'<RVSlideGrouping name="{_xml_attr(n)}" color="{c}" uuid="{_new_uuid()}">'
+        f'<array rvXMLIvarName="slides">{"".join(ss)}</array>'
+        '</RVSlideGrouping>' for n,c,ss in groups)
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             '<RVPresentationDocument CCLIArtistCredits="" CCLIAuthor="" CCLICopyrightYear="" '
             'CCLIDisplay="" CCLIPublisher="" CCLISongNumber="" CCLISongTitle="" '
@@ -1397,11 +1411,7 @@ def _doc_wrapper(slides):
             'rvXMLIvarName="timeline" selectedMediaTrackIndex="0" timeOffset="0.000000">'
             '<array rvXMLIvarName="timeCues"></array><array rvXMLIvarName="mediaTracks"></array>'
             '</RVTimeline>'
-            '<array rvXMLIvarName="groups">'
-            f'<RVSlideGrouping name="" color="0 0 0 0" uuid="{_new_uuid()}">'
-            f'<array rvXMLIvarName="slides">{"".join(slides)}</array>'
-            '</RVSlideGrouping>'
-            '</array>'
+            f'<array rvXMLIvarName="groups">{gs}</array>'
             '<array rvXMLIvarName="arrangements"></array>'
             '</RVPresentationDocument>').encode("utf-8")
 
@@ -1417,9 +1427,9 @@ def _split_layers(page, layer_by):
         return [s for s in (ln.strip() for ln in page.split("\n")) if s]
     return _split_text_blocks(page) or [page]
 
-def _build_pro6_structured(text, page_by="空行", layer_by="換行"):
-    """可組態：先依 page_by 分頁，每頁再依 layer_by 分圖層；位置 1920×1080，
-    多圖層在垂直方向均分成帶、各自置中。回傳 .pro6 bytes。"""
+def _pages_to_slides(text, page_by, layer_by):
+    """text 依 page_by 分頁、每頁依 layer_by 分圖層 → slide 元素字串清單；
+    多圖層在垂直方向均分成帶、各自置中（_build_pro6_structured 的核心）。"""
     slides=[]
     for page in _split_pages(text, page_by):
         lts=_split_layers(page, layer_by)
@@ -1427,14 +1437,89 @@ def _build_pro6_structured(text, page_by="空行", layer_by="換行"):
         m=len(lts); h=1080//m
         els=[_text_element(lt, 0, i*h, 1920, h) for i,lt in enumerate(lts)]
         slides.append(_slide_element(els))
-    return _doc_wrapper(slides)
+    return slides
+
+def _build_pro6_structured(text, page_by="空行", layer_by="換行"):
+    """可組態：先依 page_by 分頁，每頁再依 layer_by 分圖層。回傳 .pro6 bytes。"""
+    return _doc_wrapper(_pages_to_slides(text, page_by, layer_by))
 
 def _name_from_text(text):
-    """取首個非空行作為預設檔名（去掉檔名不合法字元、截斷 40 字）。"""
+    """取首個非空行作為預設檔名（去掉檔名不合法字元、截斷 40 字）。
+    整行 [標記] 不算——否則檔名會變成「[主歌]」。"""
     for ln in text.split("\n"):
+        if _MARKER_RE.match(ln.strip()): continue
         s=re.sub(r'[\\/:*?"<>|\t]', "", ln).strip()
         if s: return s[:40]
     return "未命名"
+
+# ── [] 段落標記（創造・單欄）────────────────────────────────────
+# 整行只有「[標記]」的行＝新段落開始：標記行從歌詞移除，到下一個標記前為一段，
+# 每段輸出一個具名 RVSlideGrouping（等同自動換頁，不必手動加空行）。
+# 認得的標記映射到 _GROUP_PRESETS 綁色類型；認不得的由使用者在 UI 以選單指定。
+_MARKER_RE = re.compile(r"^\[([^\[\]]+)\]$")
+
+def _marker_norm(s: str) -> str:
+    """標記正規化：去空白/連字號/底線、轉小寫——Pre-Chorus / pre chorus 同義。"""
+    return re.sub(r"[\s\-_]+", "", s).lower()
+
+_MARKER_ALIASES={}
+for _g,_als in [
+    ("標題",       ["標題","title"]),
+    ("Verse",      ["verse","verse1","v","v1","主歌","主歌1","主歌一"]),
+    ("Verse 2",    ["verse2","v2","主歌2","主歌二"]),
+    ("Chorus",     ["chorus","chorus1","chorus2","c","c1","c2","副歌","副歌1","副歌2"]),
+    ("Pre-Chorus", ["prechorus","pc","pre","導歌","前副歌"]),
+    ("Bridge",     ["bridge","b","橋段","橋"]),
+]:
+    for _a in _als: _MARKER_ALIASES[_a]=_g
+
+def _marker_to_group(raw: str):
+    """[標記] 字面 → 預設段落類型名；認不得回 None。"""
+    return _MARKER_ALIASES.get(_marker_norm(raw))
+
+def _scan_markers(text):
+    """回傳整行 [標記] 的字面清單（依出現順序、去重）。"""
+    seen=[]
+    for ln in text.split("\n"):
+        m=_MARKER_RE.match(ln.strip())
+        if m and m.group(1).strip() and m.group(1).strip() not in seen:
+            seen.append(m.group(1).strip())
+    return seen
+
+def _split_marked_sections(text, as_lyric=()):
+    """依整行 [標記] 分段 → [(標記字面或 None, 段文字), ...]；首個標記前若有
+    內容，標記=None。as_lyric 中的標記視為一般歌詞行、不分段。"""
+    secs=[]; cur=[]; cur_m=None
+    for ln in text.split("\n"):
+        m=_MARKER_RE.match(ln.strip())
+        raw=m.group(1).strip() if m else ""
+        if m and raw and raw not in as_lyric:
+            if cur_m is not None or "\n".join(cur).strip():
+                secs.append((cur_m, "\n".join(cur)))
+            cur_m=raw; cur=[]
+        else:
+            cur.append(ln)
+    if cur_m is not None or "\n".join(cur).strip():
+        secs.append((cur_m, "\n".join(cur)))
+    return secs
+
+def _build_pro6_marked(text, decisions, page_by="空行", layer_by="換行"):
+    """含 [] 標記的單欄創造：依標記切成多個具名群組，段內再依 page_by/layer_by
+    分頁/圖層。decisions={標記字面: 預設類型名 | "__literal__"(照字面、無色)
+    | "__lyric__"(當歌詞不分段)}。沒內容的段落（標記後緊接另一標記）跳過。"""
+    as_lyric={m for m,d in decisions.items() if d=="__lyric__"}
+    groups=[]
+    for raw,sec in _split_marked_sections(text, as_lyric):
+        slides=_pages_to_slides(sec, page_by, layer_by)
+        if not slides: continue
+        if raw is None:
+            name,color="","0 0 0 0"
+        else:
+            d=decisions.get(raw) or _marker_to_group(raw)
+            if d in (None,"__literal__"): name,color=raw,"0 0 0 0"
+            else: name,color=d,_hex_rgba(_GROUP_COLOR[d])
+        groups.append((name,color,slides))
+    return _doc_wrapper_groups(groups)
 
 def _build_pro6_bilingual(top_text, bot_text):
     """雙排：左右逐行配對，每張 slide ＝上排(左欄第i行)＋下排(右欄第i行)兩個圖層
@@ -1990,6 +2075,7 @@ def _create_ui():
     if "_overwrite_new" in st.session_state:       # 已有檔案時的覆蓋確認
         _overwrite_dialog()
     st.caption("單欄＝依下方「換頁／換圖層依據」分割（預設空行換頁、換行換圖層）。"
+               "整行 **[主歌]**、**[副歌]** 這類 [] 標記＝自動分段成綁色段落群組，免手動加空行。"
                "按文字框右側「＋」開右欄＝雙排：左右各一行配成一張（上排左欄、下排右欄）。")
     up=st.file_uploader("上傳 .txt（填入左欄）", type=["txt"], key="create_txt")
     dual=st.session_state.get("create_dual", False)
@@ -2025,11 +2111,35 @@ def _create_ui():
     _name=_base+".pro6"
 
     if right_src is None:                       # 單欄：依 page_by/layer_by 分割
-        n=len(_split_pages(left_src, page_by or "空行")) if left_src.strip() else 0
-        st.caption(f"預估：{n} 張投影片（{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）")
-        if st.button("產生並開始編輯", type="primary", use_container_width=True, disabled=n==0):
-            _request_new(_build_pro6_structured(left_src, page_by or "空行",
-                                                layer_by or "換行"), _name)
+        markers=_scan_markers(left_src)
+        if markers:                             # 有 [] 標記：依標記分段成具名群組
+            decisions={m:_marker_to_group(m) for m in markers}
+            unknown=[m for m in markers if decisions[m] is None]
+            if unknown:
+                st.markdown("**認不得的 [標記]，請指定段落類型：**")
+                _opts=[g for g,_ in _GROUP_PRESETS]+["照字面當群組名","當歌詞（不分段）"]
+                _cols=st.columns(min(len(unknown),3))
+                for _i,_m in enumerate(unknown):
+                    _sel=_cols[_i%len(_cols)].selectbox(
+                        f"[{_m}]", _opts, index=len(_opts)-2, key=f"create_mk_{_m}")
+                    decisions[_m]={"照字面當群組名":"__literal__",
+                                   "當歌詞（不分段）":"__lyric__"}.get(_sel,_sel)
+            _lyr={m for m,d in decisions.items() if d=="__lyric__"}
+            secs=_split_marked_sections(left_src,_lyr)
+            n=sum(len(_split_pages(s,page_by or "空行")) for _,s in secs)
+            _gsum="、".join(f"[{m}]→{ {'__literal__':m}.get(decisions[m],decisions[m]) }"
+                            for m in markers if decisions[m]!="__lyric__")
+            st.caption(f"偵測到段落標記：{_gsum}　→　{n} 張投影片"
+                       f"（段內{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）")
+            if st.button("產生並開始編輯", type="primary", use_container_width=True, disabled=n==0):
+                _request_new(_build_pro6_marked(left_src, decisions,
+                                                page_by or "空行", layer_by or "換行"), _name)
+        else:
+            n=len(_split_pages(left_src, page_by or "空行")) if left_src.strip() else 0
+            st.caption(f"預估：{n} 張投影片（{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）")
+            if st.button("產生並開始編輯", type="primary", use_container_width=True, disabled=n==0):
+                _request_new(_build_pro6_structured(left_src, page_by or "空行",
+                                                    layer_by or "換行"), _name)
     else:                                       # 雙排：逐行配對
         nl=len(_split_lines_ne(left_src)); nr=len(_split_lines_ne(right_src))
         equal=nl>0 and nl==nr
