@@ -93,6 +93,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import unquote
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -2243,23 +2244,32 @@ except Exception:
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
-    # 標題：載入時已預設＝檔名（_default_title），此處可改、寫回 CCLISongTitle。
-    # key 綁 _fk（檔案識別碼）：換檔＝全新 widget，才不會沿用前一檔的前端狀態
-    # 把舊標題/舊尺寸寫進新檔（固定 key 時 pop 擋不住 client 端回傳的舊值）。
+    # 標題/寬/高：表格呈現（欄位名在左、值在右），平常是純文字、雙擊「值」格
+    # 才進入編輯。標題寫回 CCLISongTitle；改寬/高＝位置與字級等比縮放（_resize_doc）。
+    # key 綁 _fk＋目前值：檔案或值一變＝全新 widget，杜絕前端殘留的舊編輯狀態
+    # 把舊值寫進新檔（同先前換檔覆寫 bug，data_editor 的編輯疊層也適用）。
     _dk=st.session_state.get("_fk")
-    _t=st.text_input("標題", value=doc_meta["title"], key=f"doc_title_{_dk}")
-    if _t.strip() and _t.strip()!=doc_meta["title"]:
+    _ed=st.data_editor(
+        pd.DataFrame([("標題",doc_meta["title"]),
+                      ("寬",str(doc_meta["w"])),("高",str(doc_meta["h"]))],
+                     columns=["項目","值"]),
+        hide_index=True, use_container_width=True, disabled=["項目"],
+        column_config={"項目": st.column_config.Column(width="small")},
+        key=f"doc_ed_{_dk}_{doc_meta['title']}_{doc_meta['w']}x{doc_meta['h']}")
+    _nt=str(_ed.iloc[0]["值"] or "").strip()
+    try:
+        _nw=int(str(_ed.iloc[1]["值"]).strip()); _nh=int(str(_ed.iloc[2]["值"]).strip())
+        if _nw<1 or _nh<1: raise ValueError
+    except ValueError:
+        _nw=_nh=None; st.toast("寬/高要是正整數", icon="⚠️")
+    if _nt and _nt!=doc_meta["title"]:
         _push_undo()
-        st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
+        st.session_state["xml_content"]=_set_title(xml_bytes,_nt)
         st.session_state["history"].append("標題"); st.rerun()
-    # 尺寸：改寬/高＝圖層位置與字級等比縮放（見 _resize_doc）
-    _c1,_c2=st.columns(2)
-    _w=_c1.number_input("寬", min_value=1, value=doc_meta["w"], key=f"doc_w_{_dk}")
-    _h=_c2.number_input("高", min_value=1, value=doc_meta["h"], key=f"doc_h_{_dk}")
-    if (_w,_h)!=(doc_meta["w"],doc_meta["h"]):
+    if _nw and (_nw,_nh)!=(doc_meta["w"],doc_meta["h"]):
         _push_undo()
-        st.session_state["xml_content"]=_resize_doc(xml_bytes,_w,_h)[0]
-        st.session_state["history"].append(f"尺寸{_w}×{_h}"); st.rerun()
+        st.session_state["xml_content"]=_resize_doc(xml_bytes,_nw,_nh)[0]
+        st.session_state["history"].append(f"尺寸{_nw}×{_nh}"); st.rerun()
     # 段落表格：段落｜張數｜圖層數（每張的文字圖層數由左而右串接，如 22222）
     if _summary_groups:
         _rows=["|段落|張數|圖層數|","|:--|--:|:--|"]
