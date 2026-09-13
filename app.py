@@ -2070,10 +2070,33 @@ def _del_slide_dialog(num):
     if c2.button("取消", key=f"delcancel_{num}", use_container_width=True):
         st.session_state.pop("_del_ask", None); st.rerun()
 
+@st.dialog("指定段落類型")
+def _marker_dialog():
+    """創造：認不得的 [標記] 逐一跳窗詢問要當哪種段落類型，問完直接建檔。"""
+    a=st.session_state["_mk_ask"]; i=a["idx"]; m=a["unknown"][i]
+    st.markdown(f"認不得的標記 **[{m}]**（第 {i+1}/{len(a['unknown'])} 個）要當哪種段落？")
+    _opts=[g for g,_ in _GROUP_PRESETS]+["照字面當群組名","當歌詞（不分段）"]
+    sel=st.radio("段落類型：", _opts, index=len(_opts)-2, key=f"mkd_{i}")
+    c1,c2=st.columns(2)
+    lbl="確認並產生" if i+1==len(a["unknown"]) else "下一個"
+    if c1.button(lbl, key=f"mkok_{i}", type="primary", use_container_width=True):
+        a["decisions"][m]={"照字面當群組名":"__literal__",
+                           "當歌詞（不分段）":"__lyric__"}.get(sel,sel)
+        a["idx"]+=1
+        if a["idx"]==len(a["unknown"]):          # 全部問完 → 建檔（_request_new 會 rerun）
+            st.session_state.pop("_mk_ask")
+            _request_new(_build_pro6_marked(a["text"],a["decisions"],
+                                            a["page_by"],a["layer_by"]), a["name"])
+        else: st.rerun()
+    if c2.button("取消", key=f"mkcancel_{i}", use_container_width=True):
+        st.session_state.pop("_mk_ask",None); st.rerun()
+
 def _create_ui():
     """創造：單欄＝可選換頁／換圖層依據；按右側「＋」開右欄做雙排（雙語）逐行配對。"""
     if "_overwrite_new" in st.session_state:       # 已有檔案時的覆蓋確認
         _overwrite_dialog()
+    elif "_mk_ask" in st.session_state:            # 認不得的 [標記] 逐一詢問
+        _marker_dialog()
     st.caption("單欄＝依下方「換頁／換圖層依據」分割（預設空行換頁、換行換圖層）。"
                "整行 **[主歌]**、**[副歌]** 這類 [] 標記＝自動分段成綁色段落群組，免手動加空行。"
                "按文字框右側「＋」開右欄＝雙排：左右各一行配成一張（上排左欄、下排右欄）。")
@@ -2115,25 +2138,21 @@ def _create_ui():
         if markers:                             # 有 [] 標記：依標記分段成具名群組
             decisions={m:_marker_to_group(m) for m in markers}
             unknown=[m for m in markers if decisions[m] is None]
-            if unknown:
-                st.markdown("**認不得的 [標記]，請指定段落類型：**")
-                _opts=[g for g,_ in _GROUP_PRESETS]+["照字面當群組名","當歌詞（不分段）"]
-                _cols=st.columns(min(len(unknown),3))
-                for _i,_m in enumerate(unknown):
-                    _sel=_cols[_i%len(_cols)].selectbox(
-                        f"[{_m}]", _opts, index=len(_opts)-2, key=f"create_mk_{_m}")
-                    decisions[_m]={"照字面當群組名":"__literal__",
-                                   "當歌詞（不分段）":"__lyric__"}.get(_sel,_sel)
-            _lyr={m for m,d in decisions.items() if d=="__lyric__"}
-            secs=_split_marked_sections(left_src,_lyr)
+            secs=_split_marked_sections(left_src)
             n=sum(len(_split_pages(s,page_by or "空行")) for _,s in secs)
-            _gsum="、".join(f"[{m}]→{ {'__literal__':m}.get(decisions[m],decisions[m]) }"
-                            for m in markers if decisions[m]!="__lyric__")
-            st.caption(f"偵測到段落標記：{_gsum}　→　{n} 張投影片"
-                       f"（段內{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）")
+            _gsum="、".join(f"[{m}]→{decisions[m] or '？'}" for m in markers)
+            st.caption(f"偵測到段落標記：{_gsum}　→　約 {n} 張投影片"
+                       f"（段內{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）"
+                       +("；「？」＝認不得，產生時逐一詢問" if unknown else ""))
             if st.button("產生並開始編輯", type="primary", use_container_width=True, disabled=n==0):
-                _request_new(_build_pro6_marked(left_src, decisions,
-                                                page_by or "空行", layer_by or "換行"), _name)
+                if unknown:                      # 認不得的：跳提示框一個一個問
+                    st.session_state["_mk_ask"]={
+                        "text":left_src,"decisions":decisions,"unknown":unknown,"idx":0,
+                        "page_by":page_by or "空行","layer_by":layer_by or "換行","name":_name}
+                    st.rerun()
+                else:
+                    _request_new(_build_pro6_marked(left_src, decisions,
+                                                    page_by or "空行", layer_by or "換行"), _name)
         else:
             n=len(_split_pages(left_src, page_by or "空行")) if left_src.strip() else 0
             st.caption(f"預估：{n} 張投影片（{page_by or '空行'}換頁、{layer_by or '換行'}換圖層）")
