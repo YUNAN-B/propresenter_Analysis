@@ -1913,9 +1913,8 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   width:min(1100px,92vw)!important;max-width:min(1100px,92vw)!important;}
 
-/* 側欄匯出區：sticky 釘在底部，資訊區滾動不影響；實底色蓋住滑過的內容 */
+/* 側欄匯出區：sticky 釘在底部，資訊區滾動不影響；底色於下方依主題動態注入 */
 [class*="st-key-sidebar_export"]{position:sticky;bottom:0;z-index:5;
-  background:var(--secondary-background-color,#f0f2f6);
   padding:.5rem 0 .25rem;border-top:1px solid rgba(128,128,128,.25);}
 
 /* 手機專用匯出鈕：桌機隱藏（桌機用側欄那顆即可） */
@@ -1945,6 +1944,13 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
 }
 </style>
 """, unsafe_allow_html=True)
+
+# 側欄匯出區底色跟隨主題（深色＝Streamlit 預設深色的側欄色；切主題會 rerun 自動更新）。
+# st.context.theme 需 Streamlit ≥1.46；不可用時（舊版/測試 stub）退回淺色。
+try: _sb_dark = st.context.theme.type == "dark"
+except Exception: _sb_dark = False
+st.markdown(f"<style>[class*='st-key-sidebar_export']{{background:"
+            f"{'#262730' if _sb_dark else '#f0f2f6'};}}</style>", unsafe_allow_html=True)
 
 # ── 整頁拖放上傳 ────────────────────────────────────────────────
 # st.file_uploader 只吃拖進它自己框內的檔案；這裡經 components 的 iframe（同源，
