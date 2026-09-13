@@ -93,7 +93,6 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import unquote
 
-import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -1914,6 +1913,11 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   width:min(1100px,92vw)!important;max-width:min(1100px,92vw)!important;}
 
+/* 側欄匯出區：sticky 釘在底部，資訊區滾動不影響；實底色蓋住滑過的內容 */
+[class*="st-key-sidebar_export"]{position:sticky;bottom:0;z-index:5;
+  background:var(--secondary-background-color,#f0f2f6);
+  padding:.5rem 0 .25rem;border-top:1px solid rgba(128,128,128,.25);}
+
 /* 手機專用匯出鈕：桌機隱藏（桌機用側欄那顆即可） */
 [class*="st-key-mobile_export"]{display:none;}
 
@@ -2244,32 +2248,18 @@ except Exception:
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
-    # 標題/寬/高：表格呈現（欄位名在左、值在右），平常是純文字、雙擊「值」格
-    # 才進入編輯。標題寫回 CCLISongTitle；改寬/高＝位置與字級等比縮放（_resize_doc）。
-    # key 綁 _fk＋目前值：檔案或值一變＝全新 widget，杜絕前端殘留的舊編輯狀態
-    # 把舊值寫進新檔（同先前換檔覆寫 bug，data_editor 的編輯疊層也適用）。
+    # 標題：輸入框（標籤在左）、寫回 CCLISongTitle。key 綁 _fk：換檔＝全新
+    # widget，杜絕前端殘留的舊值寫進新檔。尺寸為靜態資訊、不可編輯。
     _dk=st.session_state.get("_fk")
-    _ed=st.data_editor(                      # 欄名留空＝不顯示表頭文字（表頭為 canvas，CSS 藏不掉）
-        pd.DataFrame([("標題",doc_meta["title"]),
-                      ("寬",str(doc_meta["w"])),("高",str(doc_meta["h"]))],
-                     columns=["", " "]),
-        hide_index=True, use_container_width=True, disabled=[""],
-        column_config={"": st.column_config.Column(width="small")},
-        key=f"doc_ed_{_dk}_{doc_meta['title']}_{doc_meta['w']}x{doc_meta['h']}")
-    _nt=str(_ed.iloc[0,1] or "").strip()
-    try:
-        _nw=int(str(_ed.iloc[1,1]).strip()); _nh=int(str(_ed.iloc[2,1]).strip())
-        if _nw<1 or _nh<1: raise ValueError
-    except ValueError:
-        _nw=_nh=None; st.toast("寬/高要是正整數", icon="⚠️")
-    if _nt and _nt!=doc_meta["title"]:
+    _tc1,_tc2=st.columns([1,3], vertical_alignment="center")
+    _tc1.markdown("**標題**")
+    _t=_tc2.text_input("標題", value=doc_meta["title"], key=f"doc_title_{_dk}",
+                       label_visibility="collapsed")
+    if _t.strip() and _t.strip()!=doc_meta["title"]:
         _push_undo()
-        st.session_state["xml_content"]=_set_title(xml_bytes,_nt)
+        st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
         st.session_state["history"].append("標題"); st.rerun()
-    if _nw and (_nw,_nh)!=(doc_meta["w"],doc_meta["h"]):
-        _push_undo()
-        st.session_state["xml_content"]=_resize_doc(xml_bytes,_nw,_nh)[0]
-        st.session_state["history"].append(f"尺寸{_nw}×{_nh}"); st.rerun()
+    st.caption(f"尺寸　{doc_meta['w']} × {doc_meta['h']}")
     # 段落表格：段落｜張數｜圖層數（每張的文字圖層數由左而右串接，如 22222）
     if _summary_groups:
         _rows=["|段落|張數|圖層數|","|:--|--:|:--|"]
@@ -2292,18 +2282,19 @@ with st.sidebar:
             st.session_state.pop(k, None)
         st.rerun()
     st.divider()
-    default_name=st.session_state["filename"].rsplit(".",1)[0]
-    out_name=st.text_input("匯出檔名", key="export_name").strip() or default_name
-    # 匯出時自動確保 UUID 不重複
-    export_bytes, _n_uuid = _dedup_uuids(xml_bytes)
-    if _n_uuid: st.caption(f"匯出將修復 {_n_uuid} 個重複 UUID")
-    st.download_button(f"匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
-                       "application/xml", use_container_width=True)
-    st.divider()
     # 卡住自救：清全域快取＋暫態旗標、還原到剛載入的檔（不丟掉已上傳的檔）
     if st.button("🔄 卡住了？重設", use_container_width=True,
                  help="清除快取與暫存狀態、把檔案還原到剛載入時。操作後若怪怪的、重新整理也沒用時點這個。"):
         _soft_reset()
+    # 匯出區：放側欄最末＋sticky CSS 釘在底部，上方資訊區滾動時不動
+    with st.container(key="sidebar_export"):
+        default_name=st.session_state["filename"].rsplit(".",1)[0]
+        out_name=st.text_input("匯出檔名", key="export_name").strip() or default_name
+        # 匯出時自動確保 UUID 不重複
+        export_bytes, _n_uuid = _dedup_uuids(xml_bytes)
+        if _n_uuid: st.caption(f"匯出將修復 {_n_uuid} 個重複 UUID")
+        st.download_button(f"匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
+                           "application/xml", use_container_width=True)
 
 # 手機專用：主畫面頂端也放一顆匯出鈕（桌機用 CSS 隱藏，免得手機要先開側欄才能下載）
 with st.container(key="mobile_export"):
