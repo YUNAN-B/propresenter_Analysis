@@ -2243,16 +2243,19 @@ except Exception:
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
-    # 標題：載入時已預設＝檔名（_default_title），此處可改、寫回 CCLISongTitle
-    _t=st.text_input("標題", value=doc_meta["title"], key="doc_title")
+    # 標題：載入時已預設＝檔名（_default_title），此處可改、寫回 CCLISongTitle。
+    # key 綁 _fk（檔案識別碼）：換檔＝全新 widget，才不會沿用前一檔的前端狀態
+    # 把舊標題/舊尺寸寫進新檔（固定 key 時 pop 擋不住 client 端回傳的舊值）。
+    _dk=st.session_state.get("_fk")
+    _t=st.text_input("標題", value=doc_meta["title"], key=f"doc_title_{_dk}")
     if _t.strip() and _t.strip()!=doc_meta["title"]:
         _push_undo()
         st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
         st.session_state["history"].append("標題"); st.rerun()
     # 尺寸：改寬/高＝圖層位置與字級等比縮放（見 _resize_doc）
     _c1,_c2=st.columns(2)
-    _w=_c1.number_input("寬", min_value=1, value=doc_meta["w"], key="doc_w")
-    _h=_c2.number_input("高", min_value=1, value=doc_meta["h"], key="doc_h")
+    _w=_c1.number_input("寬", min_value=1, value=doc_meta["w"], key=f"doc_w_{_dk}")
+    _h=_c2.number_input("高", min_value=1, value=doc_meta["h"], key=f"doc_h_{_dk}")
     if (_w,_h)!=(doc_meta["w"],doc_meta["h"]):
         _push_undo()
         st.session_state["xml_content"]=_resize_doc(xml_bytes,_w,_h)[0]
