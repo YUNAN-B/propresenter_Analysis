@@ -93,6 +93,7 @@ from typing import Callable, Optional
 from urllib.parse import unquote
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1810,6 +1811,74 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ── 整頁拖放上傳 ────────────────────────────────────────────────
+# st.file_uploader 只吃拖進它自己框內的檔案；這裡經 components 的 iframe（同源，
+# 可碰 window.parent）在父頁面掛整頁 drag/drop：拖入時顯示遮罩，放開時依副檔名
+# 找第一個 accept 相符的 uploader（.pro6/.xml→主上傳器、.txt→創造分頁），把檔案
+# 塞進其 <input> 並發 change 事件讓 Streamlit 接手。rerun 會重建 iframe，故用
+# __pp_dnd__ 旗標確保監聽器只掛一次（遮罩掛在 body 上，不受 Streamlit 重繪影響）。
+components.html("""<script>
+(function(){
+  const P=window.parent;
+  if(P.__pp_dnd__)return; P.__pp_dnd__=true;
+  const doc=P.document;
+
+  const ov=doc.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:999999;display:none;pointer-events:none;'
+    +'background:rgba(255,75,75,.10);border:3px dashed #ff4b4b;border-radius:12px;'
+    +'align-items:center;justify-content:center;';
+  ov.innerHTML='<div style="font-size:1.4rem;font-weight:700;color:#ff4b4b;'
+    +'background:rgba(255,255,255,.92);padding:.7rem 1.5rem;border-radius:10px;'
+    +'box-shadow:0 4px 16px rgba(0,0,0,.15);">放開以上傳（.pro6 / .xml / .txt）</div>';
+  doc.body.appendChild(ov);
+
+  let depth=0;
+  const hasFiles=e=>e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files');
+  const hide=()=>{ov.style.display='none';depth=0;};
+
+  doc.addEventListener('dragenter',e=>{
+    if(!hasFiles(e))return;
+    e.preventDefault(); depth++; ov.style.display='flex';
+  },true);
+  doc.addEventListener('dragover',e=>{ if(hasFiles(e))e.preventDefault(); },true);
+  doc.addEventListener('dragleave',e=>{
+    if(!hasFiles(e))return;
+    depth=Math.max(0,depth-1);
+    if(depth===0||e.relatedTarget===null)hide();
+  },true);
+  doc.addEventListener('drop',e=>{
+    if(!hasFiles(e))return;
+    hide();
+    // 放在原生上傳框上就不插手，交給 Streamlit 原生處理
+    if(e.target&&e.target.closest&&e.target.closest('[data-testid="stFileUploaderDropzone"]'))return;
+    e.preventDefault(); e.stopPropagation();
+    const files=Array.from(e.dataTransfer.files||[]);
+    const inputs=Array.from(doc.querySelectorAll('[data-testid="stFileUploader"] input[type="file"]'));
+    if(!files.length||!inputs.length)return;
+
+    const accepts=(inp,f)=>{
+      const acc=(inp.getAttribute('accept')||'').toLowerCase();
+      if(!acc)return true;
+      const ext='.'+f.name.split('.').pop().toLowerCase();
+      return acc.split(',').map(s=>s.trim()).includes(ext);
+    };
+    const groups=new Map();                 // input → 該給它的檔案
+    for(const f of files){
+      const inp=inputs.find(i=>accepts(i,f));
+      if(!inp)continue;                     // 沒 uploader 收的副檔名直接略過
+      if(!groups.has(inp))groups.set(inp,[]);
+      groups.get(inp).push(f);
+    }
+    for(const [inp,fs] of groups){
+      const dt=new DataTransfer();
+      (inp.multiple?fs:fs.slice(0,1)).forEach(f=>dt.items.add(f));
+      inp.files=dt.files;
+      inp.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+  },true);
+})();
+</script>""", height=0)
 
 def _push_undo():
     """變更前把目前狀態存入 undo 堆疊（上限 50 步）。"""
