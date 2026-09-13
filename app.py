@@ -88,6 +88,7 @@ import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
+import zlib
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import unquote
@@ -1881,9 +1882,11 @@ components.html("""<script>
 </script>""", height=0)
 
 def _push_undo():
-    """變更前把目前狀態存入 undo 堆疊（上限 50 步）。"""
+    """變更前把目前狀態存入 undo 堆疊（上限 50 步）。
+    存 zlib 壓縮後的 bytes（XML 壓縮率通常 90%+）——大檔（含 base64 背景圖）
+    × 50 步 × 每個 session 各一份，不壓縮會吃爆 Streamlit Cloud 的 1GB RAM。"""
     us=st.session_state.setdefault("undo_stack", [])
-    us.append(st.session_state["xml_content"])
+    us.append(zlib.compress(st.session_state["xml_content"]))
     if len(us)>50: del us[:len(us)-50]
 
 def _soft_reset():
@@ -2079,7 +2082,7 @@ with st.sidebar:
     _undo=st.session_state.get("undo_stack", [])
     if st.button("還原（復原上一步）", use_container_width=True,
                  disabled=not _undo):
-        st.session_state["xml_content"]=_undo.pop()
+        st.session_state["xml_content"]=zlib.decompress(_undo.pop())
         if st.session_state.get("history"): st.session_state["history"].pop()
         for k in [k for k in st.session_state if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
             st.session_state.pop(k, None)
