@@ -108,3 +108,16 @@ def test_collect_pro_files_zip(app):
     assert [(n, d) for n, d in got] == [("歌曲A", b"\x0a\x01x"),
                                         ("歌曲B", b"\x0a\x01y"),
                                         ("單檔", b"\x0a\x01z")]
+
+
+# ── header-only RTF（Pro7 空文字層）不得掃出亂碼 ─────────────────
+_HDR_ONLY_RTF = ("{\\rtf1\\ansi\\ansicpg950\\cocoartf2869\n"
+                 "\\cocoatextscaling0\\cocoaplatform0{\\fonttbl}\n"
+                 "{\\colortbl;\\red255\\green255\\blue255;}\n"
+                 "{\\*\\expandedcolortbl;;}\n}")
+
+def test_parse_rtf_header_only_is_empty(app):
+    r = app.parse_rtf(_HDR_ONLY_RTF)
+    assert r.plain() == ""                      # 修正前會掃出「lue255;」等 header 亂碼
+    assert app.parse_rtf(_HDR_ONLY_RTF, keep_empty=True).runs == [] or \
+           all(not x.text.strip() for x in app.parse_rtf(_HDR_ONLY_RTF, keep_empty=True).runs)

@@ -179,6 +179,22 @@ def _rtf_plain(rtf_bytes: bytes) -> str:
             out.append("\n")
     return "".join(out).strip()
 
+# header 群組（fonttbl/colortbl/expandedcolortbl）：判空時先剝掉
+_RTF_HDR_GROUP = re.compile(r"\{\\\*?\\?(?:fonttbl|colortbl|expandedcolortbl)[^{}]*\}")
+
+def _rtf_is_empty(rtf: bytes) -> bool:
+    """Pro7 的「空文字層」是 header-only RTF（無 \\pard、無內文）。
+    剝掉 header 群組與控制字後若無任何內容 token（\\uNNNN、\\'xx、可見字元）
+    即視為空——這種 RTF 不該生成 pro6 文字圖層（會被 parser 誤讀成亂碼）。"""
+    try: s = rtf.decode("utf-8", "replace")
+    except Exception: return False
+    s = _RTF_HDR_GROUP.sub("", s)
+    if re.search(r"\\u-?\d", s): return False          # unicode 字＝有內容（\uc0 不會誤中）
+    if re.search(r"\\'[0-9a-fA-F]{2}", s): return False  # 碼頁 hex 字＝有內容
+    s = re.sub(r"\\[a-zA-Z*]+-?\d*\s?", "", s)         # 控制字
+    if re.search(r"\\[{}\\]", s): return False         # 跳脫字面 { } \ ＝有內容
+    return not s.replace("{", "").replace("}", "").strip()
+
 _VIDEO_EXT = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mpg", ".mpeg")
 _AUDIO_EXT = (".mp3", ".m4a", ".wav", ".aac", ".aiff", ".flac")
 
@@ -305,7 +321,7 @@ def parse_pro7(data: bytes) -> dict:
                 "valign": _varint(text, 6, 0),
                 "rtf":    rtf,
                 "hidden": bool(_varint(el, 16)),
-                "has_text": bool(rtf.strip()),
+                "has_text": bool(rtf.strip()) and not _rtf_is_empty(rtf),
                 "media_url":  murl,
                 "media_kind": _media_kind(murl, fill_media) if murl else "",
             })

@@ -282,7 +282,15 @@ def _body_bounds(rtf: str) -> tuple:
         if m: he = m.end(); break
     if he is None:
         m = re.search(r"\\fs\d+", rtf)
-        he = m.start() if m else 0
+        if m:
+            he = m.start()
+        else:
+            # header-only RTF（如 Pro7 的空文字層：{\fonttbl}{\colortbl…} 後直接結束，
+            # 無 \pard 也無 \fs）：跳過所有 header 群組，否則 colortbl 會被當正文掃出
+            # 亂碼（\blue255 → 粗體+「lue255;」）。
+            he = 0
+            for g in re.finditer(r"\{\\\*?\\?[a-zA-Z]+[^{}]*\}", rtf):
+                he = g.end()
     while he < len(rtf) and rtf[he] in "\r\n\t ":
         he += 1
     stripped = rtf.rstrip()

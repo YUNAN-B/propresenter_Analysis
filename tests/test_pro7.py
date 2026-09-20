@@ -227,3 +227,25 @@ def test_real_file_smoke(app):
     plains = [l["full"] for g in groups for s in g["slides"] for l in s["layers"]
               if l["type"] == "RVTextElement"]
     assert plains and any(p.strip() for p in plains)
+
+
+_EMPTY_RTF = ("{\\rtf1\\ansi\\ansicpg950\\cocoartf2869\n"
+              "\\cocoatextscaling0\\cocoaplatform0{\\fonttbl}\n"
+              "{\\colortbl;\\red255\\green255\\blue255;}\n"
+              "{\\*\\expandedcolortbl;;}\n}")
+
+def test_empty_rtf_element_skipped(app):
+    """Pro7 的空文字層＝header-only RTF：不得生成 pro6 文字圖層。"""
+    assert pro7._rtf_is_empty(_EMPTY_RTF.encode())
+    assert not pro7._rtf_is_empty(_RTF.encode())          # 有 \uNNNN 內容的不誤判
+    cue = _cue("CUE-E", _slide("SL-E", [
+        _text_el("EL-T", "有字", 0, 0, 1920, 540),
+        _text_el("EL-E", "空層", 0, 540, 1920, 540, rtf=_EMPTY_RTF),
+    ]))
+    doc = (_len(1, _int(1, 1)) + _str(3, "空層測試")
+           + _len(12, _group("Verse", (0, 0, 1, 1), ["CUE-E"]))
+           + _len(13, cue))
+    nb, rep = pro7.pro7_to_pro6(doc)
+    assert rep["n_text"] == 1 and rep["n_skipped"] == 1
+    root = ET.fromstring(nb.decode("utf-8"))
+    assert len(root.findall(".//RVTextElement")) == 1     # 只剩有字那層
