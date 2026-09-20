@@ -1855,6 +1855,39 @@ _ABOUT_TEXT = """### ProParse · 投影片解析
 - 匯出時會自動修復重複的 UUID，避免 ProPresenter 開檔異常。
 - 所有批次動作都可以用左側欄「還原」一步步退回。
 - 頁面卡住或行為怪怪的：重新整理，再重傳一次原檔即可，不會弄壞你的原始檔。
+---
+
+## 🔧 給技術人員
+
+看得懂這區再看；名詞不解釋。
+
+**格式與匯出**
+
+- .pro6 = 單份 UTF-8 XML（節點靠 `rvXMLIvarName` 定位）；.pro = protobuf。前者可 diff、可 grep，這是整套工具能做「無損批次編輯」的前提。
+- 匯出刻意**不做整份 XML reformat**：未被編輯的位元組保持原樣（含縮排與節點順序），所以 diff 轉換前後檔案時只會看到真正動過的地方。自閉合標籤會被展開——ProPresenter 6 的 deserializer 對 `<x/>` 不可靠。
+- 歌詞內文是 base64 的 RTF；編輯採 span 定點替換而非重新序列化，RTF header 與沒動到的 run 位元組不變。
+- 匯出前自動 dedup UUID：Pro6 對重複 UUID 的行為是未定義的（跳張、選取錯亂）。
+
+**已知的坑**
+
+- RTF 的 `\uc` 陷阱：`\uNNNN` 後會吃掉替代字元，處理不當會出現 I've → I'e 這類掉字。本工具寫入一律前置 `\uc0`，但手改 RTF 的人要自己注意。
+- ProPresenter 在樣式切換處會多塞一個換行（段落標記）；直接取明文會看到雙語單行被穿插斷開。顯示與合併已做扣除，寫 script 直接 parse 的人會踩到。
+- 舊檔中文可能是 cp950 的 `\'XX` hex 而非 `\uNNNN`，兩種都要處理。
+- 撰寫頁存檔是「整層套首字樣式」：同層多樣式（如中英異字級）會被靜默統一。要保留 per-run 樣式，用模板或不要動那層。
+- 繁簡轉換是 token 就地替換、不動控制字；拼音必須先 opencc t2s 再 pypinyin，否則詞組字典與多音字全失準。
+
+**Pro7 轉換的取捨**
+
+- 顯示順序以 `cue_groups` 的 `cue_identifiers` 為準；`cues` 只是儲存袋，順序不可信。照 cues 走會把一首歌切成幾十段碎片。
+- 歌詞 RTF 是原封搬運（Pro7 與 Pro6 同為 cocoa RTF），所以字體/字級/顏色/斷行 bit-perfect；但目標機器沒裝該字型時 fallback 行為由 ProPresenter 決定。
+- 不轉：背景媒體 cue（媒體檔不在 .pro 內、路徑屬於別台機器）、effects、looks、arrangements。arrangement 被攤平成文件順序。
+- `Cue.isEnabled` 是 proto3 bool，false 與未設定在線路上無法區分，一律輸出 enabled="true"。
+- 轉換是單向的：本工具不產生 .pro。要回 Pro7，用 Pro7 內建的 pro6 匯入。
+
+**其他**
+
+- undo 堆疊存 zlib 壓縮 snapshot（上限 50 步）；含大量 base64 背景圖的檔案也不會吃爆記憶體。
+- 每步批次動作 commit 前都會先驗證 XML 可解析，壞結果不入狀態。
 """
 
 st.set_page_config(
