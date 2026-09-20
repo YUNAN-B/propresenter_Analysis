@@ -138,7 +138,7 @@ def test_convert_to_valid_pro6(app, synth_pro):
     rtf = base64.b64decode(tls[0].find('NSString[@rvXMLIvarName="RTFData"]').text)
     assert rtf.decode("utf-8") == _RTF
     plain = app.parse_rtf(rtf.decode("utf-8")).plain()
-    assert [ord(c) for c in plain.strip()] == [35406, 32654, 20027]   # 㕀6㉥4 7
+    assert [ord(c) for c in plain.strip()] == [35406, 32654, 20027]   # 讚美主（\uNNNN 碼位）
     # 媒體元素不產生文字層
     s2 = gs[1].find(".//RVDisplaySlide")
     assert len(s2.findall(".//RVTextElement")) == 1
