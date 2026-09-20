@@ -1908,7 +1908,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 2. **修改**：用上方分頁檢視或編輯（不知道去哪就看下面的對照表）。
 3. **匯出**：左側欄最底下輸入檔名 → 點「匯出」，下載改好的 .pro6。
 
-改壞了不用怕：左側欄 **↶** 一步步退回、**↷** 重做；再不行就重新整理頁面、重傳原檔。
+改壞了不用怕：左側欄 **⟲** 一步步退回、**⟳** 重做；再不行就重新整理頁面、重傳原檔。
 
 ---
 
@@ -1927,7 +1927,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 找錯字、全檔取代文字 | **模板** → 搜尋取代 |
 | 看每張投影片大概長什麼樣（縮圖） | **解析** → 開「視覺預覽」 |
 | 調整投影片順序 | **撰寫** → 詳細編輯 → ↑↓ |
-| 按錯了想反悔／反悔了又後悔 | 左側欄 ↶（還原）↷（重做） |
+| 按錯了想反悔／反悔了又後悔 | 左側欄 ⟲（還原）⟳（重做） |
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
 | 把 Pro7 的 .pro 變成 .pro6 | **轉換** 分頁（可多檔、打包下載），或直接上傳 .pro |
@@ -1983,7 +1983,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 ## 小提醒
 
-- 所有批次動作都可以用左側欄 ↶ 一步步退回，↷ 重做。
+- 所有批次動作都可以用左側欄 ⟲ 一步步退回，⟳ 重做。
 - 頁面卡住或行為怪怪的：重新整理，再重傳一次原檔即可，不會弄壞你的原始檔。
 ---
 
@@ -2540,14 +2540,14 @@ with st.sidebar:
                   if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
             st.session_state.pop(k, None)
     _uc,_rc=st.columns(2)
-    if _uc.button("↶", use_container_width=True, disabled=not _undo,
+    if _uc.button("⟲", use_container_width=True, disabled=not _undo,
                   help="還原（復原上一步）"):
         _cur=st.session_state["xml_content"]
         _lbl=st.session_state["history"].pop() if st.session_state.get("history") else ""
         _redo.append((zlib.compress(_cur), _lbl))     # 現況入重做堆疊（連同歷史標籤）
         st.session_state["xml_content"]=zlib.decompress(_undo.pop())
         _clear_widget_cache(); st.rerun()
-    if _rc.button("↷", use_container_width=True, disabled=not _redo,
+    if _rc.button("⟳", use_container_width=True, disabled=not _redo,
                   help="重做（取消上一次還原）"):
         _cur=st.session_state["xml_content"]
         _nb,_lbl=_redo.pop()
@@ -2560,9 +2560,8 @@ with st.sidebar:
     with st.container(key="sidebar_export"):
         default_name=st.session_state["filename"].rsplit(".",1)[0]
         out_name=st.text_input("匯出檔名", key="export_name").strip() or default_name
-        # 匯出時自動確保 UUID 不重複
+        # 匯出時自動確保 UUID 不重複（默默修，不提示）
         export_bytes, _n_uuid = _dedup_uuids(xml_bytes)
-        if _n_uuid: st.caption(f"匯出將修復 {_n_uuid} 個重複 UUID")
         st.download_button(f"匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
                            "application/xml", use_container_width=True)
 
