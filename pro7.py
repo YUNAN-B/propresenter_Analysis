@@ -185,7 +185,8 @@ _RTF_HDR_GROUP = re.compile(r"\{\\\*?\\?(?:fonttbl|colortbl|expandedcolortbl)[^{
 def _rtf_is_empty(rtf: bytes) -> bool:
     """Pro7 的「空文字層」是 header-only RTF（無 \\pard、無內文）。
     剝掉 header 群組與控制字後若無任何內容 token（\\uNNNN、\\'xx、可見字元）
-    即視為空——這種 RTF 不該生成 pro6 文字圖層（會被 parser 誤讀成亂碼）。"""
+    即視為空。空圖層仍是圖層、照樣輸出（report 以 n_empty 統計），
+    這個判定只用於統計呈現。"""
     try: s = rtf.decode("utf-8", "replace")
     except Exception: return False
     s = _RTF_HDR_GROUP.sub("", s)
@@ -321,7 +322,8 @@ def parse_pro7(data: bytes) -> dict:
                 "valign": _varint(text, 6, 0),
                 "rtf":    rtf,
                 "hidden": bool(_varint(el, 16)),
-                "has_text": bool(rtf.strip()) and not _rtf_is_empty(rtf),
+                "has_text": bool(rtf.strip()),
+                "is_empty": bool(rtf.strip()) and _rtf_is_empty(rtf),
                 "media_url":  murl,
                 "media_kind": _media_kind(murl, fill_media) if murl else "",
             })
@@ -536,6 +538,8 @@ def pro7_to_pro6(data: bytes, path_map=None) -> tuple:
     n_skip = sum(1 for g in model["groups"] for s in g["slides"]
                  for e in s["elements"]
                  if e["hidden"] or (not e["has_text"] and not e["media_url"]))
+    n_empty = sum(1 for g in model["groups"] for s in g["slides"]
+                  for e in s["elements"] if not e["hidden"] and e.get("is_empty"))
     n_bg = sum(1 for g in model["groups"] for s in g["slides"] if s.get("bg"))
     n_media_el = sum(1 for g in model["groups"] for s in g["slides"]
                      for e in s["elements"]
@@ -545,7 +549,7 @@ def pro7_to_pro6(data: bytes, path_map=None) -> tuple:
         "width":    model["width"], "height": model["height"],
         "n_groups": len(model["groups"]), "n_slides": n_slides,
         "n_text":   n_text, "n_skipped": n_skip,
-        "n_bg":     n_bg,   "n_media_el": n_media_el,
+        "n_bg":     n_bg,   "n_media_el": n_media_el, "n_empty": n_empty,
         "groups":   [(g["name"] or "(無名)", len(g["slides"])) for g in model["groups"]],
     }
     return _doc_xml(model, path_map), report

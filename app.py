@@ -2455,6 +2455,7 @@ def _convert_ui():
             c1.markdown(f"✅ **{rep['title'] or stem}**　"
                         f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
                         f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
+                        +(f"（含 {rep.get('n_empty',0)} 空層）" if rep.get("n_empty") else "")
                         +(f"　·　略過 {rep['n_skipped']} 個元素" if rep["n_skipped"] else "")
                         +_media+("　·　"+"、".join(post) if post else "")
                         +f"<br>{gsum}</span>", unsafe_allow_html=True)

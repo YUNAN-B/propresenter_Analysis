@@ -234,8 +234,9 @@ _EMPTY_RTF = ("{\\rtf1\\ansi\\ansicpg950\\cocoartf2869\n"
               "{\\colortbl;\\red255\\green255\\blue255;}\n"
               "{\\*\\expandedcolortbl;;}\n}")
 
-def test_empty_rtf_element_skipped(app):
-    """Pro7 的空文字層＝header-only RTF：不得生成 pro6 文字圖層。"""
+def test_empty_rtf_element_kept_without_garbage(app):
+    """Pro7 的空文字層＝header-only RTF：空圖層仍是圖層、照樣輸出，
+    但解析後必須是乾淨的空字串（不得掃出 colortbl 亂碼）。"""
     assert pro7._rtf_is_empty(_EMPTY_RTF.encode())
     assert not pro7._rtf_is_empty(_RTF.encode())          # 有 \uNNNN 內容的不誤判
     cue = _cue("CUE-E", _slide("SL-E", [
@@ -246,6 +247,15 @@ def test_empty_rtf_element_skipped(app):
            + _len(12, _group("Verse", (0, 0, 1, 1), ["CUE-E"]))
            + _len(13, cue))
     nb, rep = pro7.pro7_to_pro6(doc)
-    assert rep["n_text"] == 1 and rep["n_skipped"] == 1
+    assert rep["n_text"] == 2 and rep["n_empty"] == 1 and rep["n_skipped"] == 0
     root = ET.fromstring(nb.decode("utf-8"))
-    assert len(root.findall(".//RVTextElement")) == 1     # 只剩有字那層
+    tls = root.findall(".//RVTextElement")
+    assert len(tls) == 2                                  # 空層保留
+    # 空層 RTF 原封搬運
+    rtf = base64.b64decode(tls[1].find('NSString[@rvXMLIvarName="RTFData"]').text)
+    assert rtf.decode("utf-8") == _EMPTY_RTF
+    # 全管線：空層明文＝空字串、無亂碼
+    _meta, groups = app._parse_xml(nb)
+    fulls = [l["full"] for g in groups for s in g["slides"] for l in s["layers"]]
+    assert len(fulls) == 2 and fulls[1] == ""
+    assert all("lue255" not in f for f in fulls)
