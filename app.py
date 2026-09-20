@@ -2484,7 +2484,7 @@ if "_pending_new" in st.session_state:
     _load_new_doc(_raw,_name)
 
 # ── Upload / 轉換 / 創造 ────────────────────────────────────────
-st.title("ProParse · 投影片解析")
+st.title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
 uploaded = st.file_uploader("上傳 .pro6 / .xml，或 ProPresenter 7 的 .pro（自動轉換）",
                             type=["xml","pro6","pro"])
 if uploaded is not None:
@@ -2495,10 +2495,10 @@ if st.session_state.get("_pro7_err"):
     st.error("⚠️ "+st.session_state.pop("_pro7_err"))
 if "xml_content" not in st.session_state:
     st.divider()
-    st.subheader("轉換（Pro7 → Pro6）")
+    st.subheader("轉換（Pro7 → Pro6）", anchor=False)
     _convert_ui()
     st.divider()
-    st.subheader("創造（從文字產生新檔）")
+    st.subheader("創造（從文字產生新檔）", anchor=False)
     _create_ui()
     st.stop()
 
