@@ -3,6 +3,9 @@ ProParse · 投影片解析 · Streamlit App
 ═══════════════════════════════════════════════════════════════════
 批次檢視 / 編輯 ProPresenter 6（.pro6）檔，特別為雙語歌詞設計。
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
+也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
+.pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
+分頁通用；「轉換」分頁另提供批次 .pro → .pro6（多檔、zip 打包）。
 
 ── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
   pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
@@ -83,11 +86,13 @@ ProParse · 投影片解析 · Streamlit App
 
 import base64
 import copy
+import io
 import json
 import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
+import zipfile
 import zlib
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -95,6 +100,13 @@ from urllib.parse import unquote
 
 import streamlit as st
 import streamlit.components.v1 as components
+
+try:
+    import pro7                       # Pro7(.pro) → Pro6(.pro6) 轉換（同目錄）
+except ModuleNotFoundError:           # tests 以檔案路徑載入 app.py 時，根目錄可能不在 sys.path
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import pro7
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1759,14 +1771,18 @@ def _delete_slide_by_num(xml_bytes: bytes, num: int) -> tuple:
 _ABOUT_TEXT = """### ProParse · 投影片解析
 
 ProPresenter 6（.pro6）投影片的批次檢視與編輯工具，特別適合雙語歌詞。
+也吃 ProPresenter 7 的 .pro：上傳即自動轉成 .pro6，之後所有功能通用。
 所有編輯只動三個維度：**圖層**、**位置**、**明文**；匯出時自動修復重複 UUID。
 
-四個分頁：
+五個分頁：
 
 - **解析**：唯讀檢視整份檔的結構與明文（逐圖層列出位置/字體/字級/顏色/陰影，多樣式分段呈現）。
 - **模板**：對全部投影片套用一個批次動作（詳見下方）。
 - **撰寫**：逐圖層編輯文字，並可設段落類型(group)、熱鍵、刪投影片。
 - **創造**：從純文字產生新的 .pro6（單欄分割，或雙排雙語逐行配對）。
+- **轉換**：批次把 Pro7 的 .pro 轉成 .pro6（可多檔、可打包下載、可直接載入編輯）。
+  文字圖層走「RTF 原封搬運」，字體/字級/顏色/斷行/位置全保留；段落群組、標籤、
+  熱鍵、備註、CCLI 一併帶過；背景媒體與特效不轉（媒體檔本來就不在 .pro 內）。
 
 編輯後從左側欄匯出 .pro6；卡住時點左側欄「🔄 重設」。
 
@@ -1970,7 +1986,7 @@ components.html("""<script>
     +'align-items:center;justify-content:center;';
   ov.innerHTML='<div style="font-size:1.4rem;font-weight:700;color:#ff4b4b;'
     +'background:rgba(255,255,255,.92);padding:.7rem 1.5rem;border-radius:10px;'
-    +'box-shadow:0 4px 16px rgba(0,0,0,.15);">放開以上傳（.pro6 / .xml / .txt）</div>';
+    +'box-shadow:0 4px 16px rgba(0,0,0,.15);">放開以上傳（.pro6 / .pro / .xml / .txt）</div>';
   doc.body.appendChild(ov);
 
   let depth=0;
@@ -2073,11 +2089,26 @@ def _pinyin_dialog(ti, tpl_name):
         st.session_state.pop("_py_ask", None); st.rerun()
 
 def _load_new_doc(raw, name):
-    """把一份檔案（上傳／創造／覆蓋）載入為目前編輯對象，重置歷史。"""
+    """把一份檔案（上傳／創造／覆蓋）載入為目前編輯對象，重置歷史。
+    Pro7 的 .pro（protobuf）在這裡自動轉成 .pro6 再載入，之後所有分頁通用。"""
     ss=st.session_state
-    # _fk 用「原始」長度當識別，必須在正規化前算——否則正規化改了 byte 數，
+    # _fk 用「原始」長度當識別，必須在正規化/轉換前算——否則改了 byte 數，
     # 會與上傳端的 uploaded.size 對不上，導致每次 rerun 都重載原檔、洗掉所有編輯。
-    ss["_fk"]=(name, len(raw))
+    fk=(name, len(raw))
+    if pro7.is_pro7(raw, name):
+        try:
+            raw, _rep = pro7.pro7_to_pro6(raw)
+        except Exception as e:
+            ss["_fk"]=fk                      # 記住這份失敗檔，避免每次 rerun 重試
+            ss["_pro7_err"]=f"Pro7 轉換失敗：{e}"
+            return
+        name=name.rsplit(".",1)[0]+".pro6"
+        ss["_src_note"]=(f"{_rep['n_groups']} 段 / {_rep['n_slides']} 張 / {_rep['n_text']} 文字層"
+                         +(f"，略過 {_rep['n_skipped']} 個媒體/隱藏元素" if _rep['n_skipped'] else ""))
+        ss["_tpl_msg"]="✅ 已自動把 Pro7 檔轉成 .pro6（"+ss["_src_note"]+"）"
+    else:
+        ss.pop("_src_note", None)
+    ss["_fk"]=fk
     # 匯入時：群組名稱若已是預設類型，把顏色對齊綁定狀態
     try: raw=_normalize_preset_groups(raw)
     except Exception: pass
@@ -2225,19 +2256,66 @@ def _create_ui():
                      use_container_width=True, disabled=not equal):
             _request_new(_build_pro6_bilingual(left_src,right_src), _name)
 
+def _convert_ui():
+    """轉換：批次把 ProPresenter 7 的 .pro 轉成 .pro6（可下載、可直接載入編輯）。
+    文字圖層走「RTF 原封搬運」——字體/字級/顏色/斷行/位置全數保留；
+    段落群組（名稱+顏色）、投影片標籤、熱鍵、備註、CCLI 也一併帶過去。"""
+    st.caption("上傳 ProPresenter 7 的 **.pro**，轉成 ProPresenter 6 能直接開的 **.pro6**。"
+               "保留：文字圖層（字體/字級/顏色/位置/對齊）、段落群組、標籤、熱鍵、備註、CCLI。"
+               "不轉：背景影片/圖片與媒體 cue（媒體檔不在 .pro 檔內）、特效、編曲順序。")
+    ups=st.file_uploader("上傳一個或多個 .pro", type=["pro"],
+                         accept_multiple_files=True, key="conv_up")
+    if not ups: return
+    ok=[]                                        # (檔名stem, pro6 bytes)
+    for up in ups:
+        raw=up.getvalue(); stem=up.name.rsplit(".",1)[0]
+        try:
+            nb,rep=pro7.pro7_to_pro6(raw)
+        except Exception as e:
+            st.error(f"❌ **{up.name}**：{e}")
+            continue
+        ok.append((stem,nb))
+        with st.container(border=True):
+            c1,c2,c3=st.columns([4,1.2,1.2], vertical_alignment="center")
+            gsum="、".join(f"{n}×{c}" for n,c in rep["groups"][:8])
+            if len(rep["groups"])>8: gsum+="…"
+            c1.markdown(f"✅ **{rep['title'] or stem}**　"
+                        f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
+                        f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
+                        +(f"　·　略過 {rep['n_skipped']} 個媒體/隱藏元素" if rep["n_skipped"] else "")
+                        +f"<br>{gsum}</span>", unsafe_allow_html=True)
+            c2.download_button("⬇ .pro6", nb, stem+".pro6", "application/xml",
+                               key=f"convdl_{up.name}_{len(nb)}", use_container_width=True)
+            if c3.button("✏️ 載入編輯", key=f"convload_{up.name}_{len(nb)}",
+                         use_container_width=True):
+                _request_new(nb, stem+".pro6")
+    if len(ok)>1:                                # 多檔：加一鍵打包
+        zbuf=io.BytesIO()
+        with zipfile.ZipFile(zbuf,"w",zipfile.ZIP_DEFLATED) as zf:
+            for stem,nb in ok: zf.writestr(stem+".pro6", nb)
+        st.download_button(f"📦 全部下載（{len(ok)} 個 .pro6 打包 zip）", zbuf.getvalue(),
+                           "converted_pro6.zip", "application/zip",
+                           key="convzip", use_container_width=True, type="primary")
+
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:
     _raw,_name=st.session_state.pop("_pending_new")
     _load_new_doc(_raw,_name)
 
-# ── Upload / 創造 ───────────────────────────────────────────────
+# ── Upload / 轉換 / 創造 ────────────────────────────────────────
 st.title("ProParse · 投影片解析")
-uploaded = st.file_uploader("上傳 .xml 或 .pro6", type=["xml","pro6"])
+uploaded = st.file_uploader("上傳 .pro6 / .xml，或 ProPresenter 7 的 .pro（自動轉換）",
+                            type=["xml","pro6","pro"])
 if uploaded is not None:
     fk=(uploaded.name, uploaded.size)
     if st.session_state.get("_fk")!=fk:
         _load_new_doc(uploaded.read(), uploaded.name)
+if st.session_state.get("_pro7_err"):
+    st.error("⚠️ "+st.session_state.pop("_pro7_err"))
 if "xml_content" not in st.session_state:
+    st.divider()
+    st.subheader("轉換（Pro7 → Pro6）")
+    _convert_ui()
     st.divider()
     st.subheader("創造（從文字產生新檔）")
     _create_ui()
@@ -2266,6 +2344,8 @@ with st.sidebar:
         st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
         st.session_state["history"].append("標題"); st.rerun()
     st.caption(f"尺寸　{doc_meta['w']} × {doc_meta['h']}")
+    if st.session_state.get("_src_note"):
+        st.caption("🔁 由 Pro7 轉換："+st.session_state["_src_note"])
     # 段落表格：段落｜張數｜圖層數（每張的文字圖層數由左而右串接，如 22222）
     if _summary_groups:
         _rows=["|段落|張數|圖層數|","|:--|--:|:--|"]
@@ -2312,7 +2392,8 @@ if st.session_state.get("_tpl_msg"):
     st.toast(st.session_state.pop("_tpl_msg"))
 
 # ── Tabs ───────────────────────────────────────────────────────
-tab_parse, tab_tpl, tab_text, tab_new = st.tabs(["解析", "模板", "撰寫", "創造"])
+tab_parse, tab_tpl, tab_text, tab_new, tab_conv = st.tabs(
+    ["解析", "模板", "撰寫", "創造", "轉換"])
 
 
 # ─── TAB 1: 解析 ──────────────────────────────────────────────
@@ -2676,3 +2757,8 @@ with tab_text:
 with tab_new:
     st.caption("產生後會以新檔取代目前的編輯對象（記得先匯出舊檔）。")
     _create_ui()
+
+
+# ─── TAB 5: 轉換（Pro7 .pro → .pro6，批次）───────────────────────
+with tab_conv:
+    _convert_ui()
