@@ -610,6 +610,68 @@ def _build_parse_display(xml_bytes):
     return result
 
 
+# ── 視覺預覽（解析頁）：以 HTML/CSS 按比例畫出每張投影片的示意縮圖 ──
+_PV_W = 300                                   # 縮圖寬（px），高依文件比例
+
+def _html_esc(s: str) -> str:
+    return (s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
+
+@st.cache_data(show_spinner=False)
+def _render_preview_html(xml_bytes: bytes) -> str:
+    """解析頁「視覺預覽」的整面 HTML：文字圖層按位置/字級/顏色/粗斜底/垂直對齊
+    近似渲染（水平一律置中——歌詞絕大多數置中，RTF 段落對齊不另解析）。
+    非文字圖層畫半透明佔位框。示意用，非精確排版。"""
+    doc, groups = _parse_xml(xml_bytes)
+    dw, dh = max(doc.get("width",1920),1), max(doc.get("height",1080),1)
+    scale = _PV_W / dw
+    th = round(dh*scale)
+    cards=[]
+    _VA = {"0":"flex-start","1":"center","2":"flex-end"}
+    for g in groups:
+        for sl in g["slides"]:
+            layers=[]
+            for l in sl["layers"]:
+                p=l["pos"]
+                st_pos=(f"left:{p['x']*scale:.0f}px;top:{p['y']*scale:.0f}px;"
+                        f"width:{max(p['w']*scale,2):.0f}px;height:{max(p['h']*scale,2):.0f}px;")
+                if l["type"]!="RVTextElement":
+                    layers.append(f'<div class="pv-el pv-media" style="{st_pos}"></div>')
+                    continue
+                spans=[]
+                for r in l["runs"]:
+                    px = max((r.font_size_pt or 24)*1.333*scale, 4)
+                    col = r.color_hex if r.color_hex.startswith("#") else "#FFFFFF"
+                    sty = f"font-size:{px:.1f}px;color:{col};"
+                    if r.bold: sty+="font-weight:700;"
+                    if r.italic: sty+="font-style:italic;"
+                    if r.underline: sty+="text-decoration:underline;"
+                    spans.append(f'<span style="{sty}">'
+                                 +_html_esc(r.text).replace("\n","<br>")+"</span>")
+                va=_VA.get(l.get("va","0"),"flex-start")
+                layers.append(f'<div class="pv-el" style="{st_pos}align-items:{va};">'
+                              f'<div class="pv-txt">{"".join(spans)}</div></div>')
+            dot=(f'<span style="color:{g["color"]}">●</span> '
+                 if g["color"] not in ("transparent","?") else "")
+            cards.append(
+                f'<div class="pv-card"><div class="pv-canvas" '
+                f'style="width:{_PV_W}px;height:{th}px;background:'
+                f'{sl["bg"] if sl["bg"]!="transparent" else "#000"};">'
+                +"".join(layers)+"</div>"
+                f'<div class="pv-label">{sl["num"]}　{dot}{_html_esc(g["name"])}'
+                +(f'　{_html_esc(sl["label"])}' if sl["label"] else "")+"</div></div>")
+    return ("""<style>
+.pv-grid{display:flex;flex-wrap:wrap;gap:12px;}
+.pv-card{width:"""+str(_PV_W)+"""px;}
+.pv-canvas{position:relative;overflow:hidden;border-radius:6px;
+  outline:1px solid rgba(128,128,128,.35);}
+.pv-el{position:absolute;display:flex;justify-content:center;overflow:hidden;}
+.pv-txt{text-align:center;line-height:1.15;width:100%;word-break:break-all;}
+.pv-media{background:rgba(128,128,128,.25);border:1px dashed rgba(128,128,128,.6);}
+.pv-label{font-size:.72rem;color:#888;margin:.15rem 0 .3rem;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+</style><div class="pv-grid">"""+"".join(cards)+"</div>")
+
+
 # ═══════════════════════════════════════════════════════════════
 # §4  RTF TRANSFORM ENGINE
 # ═══════════════════════════════════════════════════════════════
@@ -760,7 +822,8 @@ def _parse_xml(xml_bytes: bytes):
                             full=_drop_style_break_nl(parse_rtf(rtf, keep_empty=True).runs)  # 撰寫頁整層文字
                         except: pass
                 layers.append(dict(idx=li, type=el.tag, pos=pos, runs=runs, full=full,
-                                    displayName=el.get("displayName","")))
+                                    displayName=el.get("displayName",""),
+                                    va=el.get("verticalAlignment","0")))
             slides.append(dict(
                 num=snum, label=sa.get("label",""), hotKey=sa.get("hotKey",""),
                 bg=_rgba_hex(sa.get("backgroundColor","0 0 0 1")), layers=layers))
@@ -854,6 +917,9 @@ TEMPLATES: list[dict] = [
     {"name": "清除無圖層投影片",
      "desc": "刪掉完全沒有圖層的空白投影片",
      "action": "prune_slides"},
+    {"name": "搜尋取代",
+     "desc": "在全部文字圖層中搜尋文字並取代（可選正則；取代成空字串＝刪除）",
+     "action": "find_replace"},
     {"name": "繁簡轉換",
      "desc": "預設繁→簡，勾選相反",
      "action": "tc2sc"},
@@ -1360,6 +1426,34 @@ def _apply_runs_fn(xml_bytes: bytes, fn) -> tuple:
                 if err is None and nb is not xb: xb=nb; cnt+=1
     return xb, cnt
 
+def _find_replace(xml_bytes: bytes, needle: str, repl: str, use_regex: bool=False) -> tuple:
+    """全檔搜尋取代：對每個文字圖層的每個 run 內文做替換（保留各 run 樣式）。
+    非正則模式下 needle/repl 皆按字面處理；正則模式支援群組回代（\\1）。
+    取代成空字串＝刪掉該段文字。回傳 (new_bytes, n_occurrences, err)。
+    註：不跨 run 比對——同一行被樣式切開的字串（罕見）比不到。"""
+    if not needle:
+        return xml_bytes, 0, "請先輸入要搜尋的文字"
+    try:
+        rx = re.compile(needle if use_regex else re.escape(needle), re.DOTALL)
+    except re.error as e:
+        return xml_bytes, 0, f"正則式錯誤：{e}"
+    total = [0]
+    def fn(runs):
+        out=[]
+        for r in runs:
+            if use_regex:
+                new, n = rx.subn(repl, r.text)
+            else:
+                new, n = rx.subn(lambda m: repl, r.text)   # repl 按字面（\\ 不展開）
+            total[0]+=n; out.append(new)
+        return out
+    try:
+        nb, _ = _apply_runs_fn(xml_bytes, fn)
+    except re.error as e:                                   # 正則回代引用不存在的群組等
+        return xml_bytes, 0, f"取代式錯誤：{e}"
+    return nb, total[0], None
+
+
 def _apply_tidy(xml_bytes: bytes, drop_nl: bool=False) -> tuple:
     """全檔套用「整理空白」（行為見 _tidy_runs）。drop_nl=True 連單換行一起刪。
     回傳 (new_bytes, n_layers)。"""
@@ -1762,6 +1856,28 @@ def _delete_slide_by_num(xml_bytes: bytes, num: int) -> tuple:
     return xml_bytes, "找不到投影片"
 
 
+def _move_slide(xml_bytes: bytes, num: int, delta: int) -> tuple:
+    """把第 num 張投影片上移/下移一格（delta=-1/+1），等同與相鄰投影片交換全域
+    位置；跨群組邊界時投影片會移進相鄰群組（取代對方的位置），原群組因此變空
+    則一併移除。回傳 (new_bytes, err)。"""
+    root, orig = _load_root(xml_bytes)
+    flat = [(g, s) for g, _gi, _si, s, _n in _iter_slides_global(root)]
+    i, j = num - 1, num - 1 + delta
+    if not (0 <= i < len(flat)):  return xml_bytes, "找不到投影片"
+    if not (0 <= j < len(flat)):  return xml_bytes, "已在邊界，不能再移"
+    g_src, s = flat[i]
+    g_dst, s2 = flat[j]
+    src_arr = g_src.find('array[@rvXMLIvarName="slides"]')
+    dst_arr = g_dst.find('array[@rvXMLIvarName="slides"]')
+    src_arr.remove(s)
+    pos = list(dst_arr).index(s2) + (1 if delta > 0 else 0)   # 上移＝插在 s2 前、下移＝s2 後
+    dst_arr.insert(pos, s)
+    if src_arr is not dst_arr and len(list(src_arr)) == 0:    # 原群組空了 → 移除
+        gnode = root.find('.//array[@rvXMLIvarName="groups"]')
+        gnode.remove(g_src)
+    return _xml_to_bytes(root, orig), None
+
+
 # ═══════════════════════════════════════════════════════════════
 # §7  UI
 # ═══════════════════════════════════════════════════════════════
@@ -1784,7 +1900,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 2. **修改**：用上方分頁檢視或編輯（不知道去哪就看下面的對照表）。
 3. **匯出**：左側欄最底下輸入檔名 → 點「匯出」，下載改好的 .pro6。
 
-改壞了不用怕：左側欄「**還原**」可以一步一步退回；再不行就重新整理頁面、重傳原檔。
+改壞了不用怕：左側欄 **↶** 一步步退回、**↷** 重做；再不行就重新整理頁面、重傳原檔。
 
 ---
 
@@ -1800,6 +1916,10 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 每一張套成一樣的排版 | **模板** → 最上方「樣式」 |
 | 清掉空圖層、空投影片、多餘空格 | **模板** → 統整區 |
 | 兩張合併成上下雙排 | **模板** → 合併雙排 |
+| 找錯字、全檔取代文字 | **模板** → 搜尋取代 |
+| 看每張投影片大概長什麼樣（縮圖） | **解析** → 開「視覺預覽」 |
+| 調整投影片順序 | **撰寫** → 詳細編輯 → ↑↓ |
+| 按錯了想反悔／反悔了又後悔 | 左側欄 ↶（還原）↷（重做） |
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
 | 把 Pro7 的 .pro 變成 .pro6 | **轉換** 分頁（可多檔、打包下載），或直接上傳 .pro |
@@ -1818,7 +1938,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 每張卡片＝一個批次動作，按「套用到全部投影片」就對整份檔生效；
 **卡片名稱旁的小問號，滑鼠移上去有完整說明與範例**。分三類：
 
-- **轉換**：繁簡轉換、拼音標註。
+- **轉換**：搜尋取代、繁簡轉換、拼音標註。
 - **操作**：拆行成圖層、拆圖層成投影片、加圖層、合併段落、合併雙排、批量命名圖層。
 - **統整**：清空圖層、清無圖層投影片、整理空格、只留前 N 個圖層、刪最後一個圖層。
 
@@ -1827,8 +1947,9 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 ### 撰寫（逐張改字）
 每個文字圖層一個輸入框：直接改，點別處就自動存檔。
-打開「**詳細編輯**」會多三件事——設段落類型（🟣標題 🔵主歌 🔴副歌⋯自動上色）、
-設熱鍵（一張一鍵，跟別張重複會自動搶過來）、刪除投影片（🗑）。
+打開「**詳細編輯**」會多四件事——設段落類型（🟣標題 🔵主歌 🔴副歌⋯自動上色）、
+設熱鍵（一張一鍵，跟別張重複會自動搶過來）、上下移動投影片（↑↓，可跨段落）、
+刪除投影片（🗑）。
 小規則：存檔時整層文字會統一成「第一個字的樣式」。
 
 ### 創造（從純文字生出新檔）
@@ -1837,9 +1958,11 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 按文字框旁的「＋」開右欄＝雙語模式：左右逐行配對，一張投影片上排左欄、下排右欄。
 
 ### 轉換（Pro7 → Pro6）
-上傳一個或多個 .pro，逐檔顯示轉換結果，可單獨下載、多檔打包 zip、或按「載入編輯」
-直接開始改。**會保留**：歌詞（字體/字級/顏色/位置原樣）、段落分組、標籤、熱鍵、
-備註、CCLI。**不會帶過來**：背景影片/圖片（媒體檔本來就不在 .pro 裡）、特效、編曲順序。
+上傳一個或多個 .pro（或整包 zip），逐檔顯示轉換結果，可單獨下載、多檔打包 zip、
+或按「載入編輯」直接開始改。可順便做後處理：轉完直接套樣式、繁簡轉換，一次出貨。
+**會保留**：歌詞（字體/字級/顏色/位置原樣）、段落分組、標籤、熱鍵、備註、CCLI；
+檔內帶路徑的背景媒體會轉成路徑引用（進階選項可把原機路徑前綴換成目標機的）。
+**不會帶過來**：從媒體庫連結（檔內沒有路徑）的背景、特效、編曲順序。
 
 ---
 
@@ -1852,7 +1975,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 ## 小提醒
 
-- 所有批次動作都可以用左側欄「還原」一步步退回。
+- 所有批次動作都可以用左側欄 ↶ 一步步退回，↷ 重做。
 - 頁面卡住或行為怪怪的：重新整理，再重傳一次原檔即可，不會弄壞你的原始檔。
 ---
 
@@ -1906,9 +2029,10 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 [class*="st-key-grpbtn_"] button{padding:.1rem .5rem;min-height:0;}
 /* 圖層命名：緊湊單行輸入框 */
 [class*="st-key-ln_"] input{font-size:.78rem;padding:.15rem .4rem;height:1.8rem;}
-/* 刪除鈕：與熱鍵同尺寸的正方形 */
-[class*="st-key-delbtn_"]{flex:0 0 auto!important;}
-[class*="st-key-delbtn_"] button{width:2.6rem!important;height:2.6rem!important;padding:0;min-height:0;}
+/* 刪除鈕與上下移鈕：與熱鍵同尺寸的正方形 */
+[class*="st-key-delbtn_"],[class*="st-key-mvup_"],[class*="st-key-mvdn_"]{flex:0 0 auto!important;}
+[class*="st-key-delbtn_"] button,[class*="st-key-mvup_"] button,[class*="st-key-mvdn_"] button{
+  width:2.6rem!important;height:2.6rem!important;padding:0;min-height:0;}
 /* ⋮ 選單的「About」視窗加寬約兩倍（排除自訂確認框 stDialog，避免確認框被撐大） */
 div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   width:min(1100px,92vw)!important;max-width:min(1100px,92vw)!important;}
@@ -1932,7 +2056,8 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.45rem!important;}
   [data-testid="stColumn"],[data-testid="column"]{min-width:100%!important;flex:1 1 100%!important;}
   /* 但「撰寫頁控制列」(熱鍵＋段落＋刪除) 要維持同一橫列，不要被上面規則拆直 */
-  [class*="st-key-hk_"],[class*="st-key-grppop_"],[class*="st-key-delbtn_"]{
+  [class*="st-key-hk_"],[class*="st-key-grppop_"],[class*="st-key-delbtn_"],
+  [class*="st-key-mvup_"],[class*="st-key-mvdn_"]{
     min-width:0!important;flex:0 0 auto!important;}
   [class*="st-key-ln_"] input{font-size:.72rem;}
   /* 分頁標籤縮小、可橫向捲動，避免四個分頁擠爆 */
@@ -2027,6 +2152,7 @@ def _push_undo():
     us=st.session_state.setdefault("undo_stack", [])
     us.append(zlib.compress(st.session_state["xml_content"]))
     if len(us)>50: del us[:len(us)-50]
+    st.session_state["redo_stack"]=[]      # 新的編輯使「重做」失效（標準 undo/redo 語意）
 
 def _soft_reset():
     """卡住時的自救：清全域快取 + 所有暫態旗標，把檔案還原到剛載入的狀態。"""
@@ -2036,7 +2162,7 @@ def _soft_reset():
     for k in [k for k in ss if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_","_"))]:
         ss.pop(k, None)                          # 清掉輸入框快取與所有 _xxx 暫態旗標
     if ss.get("xml_original") is not None:
-        ss["xml_content"]=ss["xml_original"]; ss["undo_stack"]=[]; ss["history"]=[]
+        ss["xml_content"]=ss["xml_original"]; ss["undo_stack"]=[]; ss["redo_stack"]=[]; ss["history"]=[]
     st.rerun()
 
 def _commit_change(tpl_name, nb, cnt, msg):
@@ -2099,7 +2225,7 @@ def _load_new_doc(raw, name):
     try: raw=_default_title(raw, name.rsplit(".",1)[0])   # 無標題→預設檔名
     except Exception: pass
     ss["xml_original"]=raw; ss["xml_content"]=raw
-    ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]
+    ss["filename"]=name; ss["history"]=[]; ss["undo_stack"]=[]; ss["redo_stack"]=[]
     ss["export_name"]=name.rsplit(".",1)[0]
     # 清掉舊檔的撰寫頁輸入框快取，否則新檔會沿用同 key 顯示成舊內容
     # （doc_ = 側欄標題/尺寸輸入框，須跟著新檔重設）
@@ -2240,37 +2366,93 @@ def _create_ui():
                      use_container_width=True, disabled=not equal):
             _request_new(_build_pro6_bilingual(left_src,right_src), _name)
 
+def _zip_member_name(info) -> str:
+    """zip 內檔名的編碼容錯：無 UTF-8 flag 的舊 zip 以 cp437→cp950/utf-8 修復中文。"""
+    n=info.filename
+    if info.flag_bits & 0x800: return n          # 已是 UTF-8
+    try: raw=n.encode("cp437")
+    except Exception: return n
+    for enc in ("utf-8","cp950"):
+        try: return raw.decode(enc)
+        except Exception: pass
+    return n
+
+def _collect_pro_files(ups) -> list:
+    """上傳清單（.pro / .zip）→ [(stem, bytes), ...]；zip 只取內部的 .pro。"""
+    out=[]
+    for up in ups:
+        raw=up.getvalue()
+        if up.name.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    for info in zf.infolist():
+                        name=_zip_member_name(info)
+                        base=name.rsplit("/",1)[-1]
+                        if (not name.lower().endswith(".pro") or info.is_dir()
+                                or "__MACOSX" in name or base.startswith(".")):
+                            continue
+                        out.append((base.rsplit(".",1)[0], zf.read(info)))
+            except zipfile.BadZipFile:
+                st.error(f"❌ **{up.name}**：不是有效的 zip 檔")
+        else:
+            out.append((up.name.rsplit(".",1)[0], raw))
+    return out
+
 def _convert_ui():
     """轉換：批次把 ProPresenter 7 的 .pro 轉成 .pro6（可下載、可直接載入編輯）。
     文字圖層走「RTF 原封搬運」——字體/字級/顏色/斷行/位置全數保留；
-    段落群組（名稱+顏色）、投影片標籤、熱鍵、備註、CCLI 也一併帶過去。"""
-    st.caption("上傳 ProPresenter 7 的 **.pro**，轉成 ProPresenter 6 能直接開的 **.pro6**。"
-               "保留：文字圖層（字體/字級/顏色/位置/對齊）、段落群組、標籤、熱鍵、備註、CCLI。"
-               "不轉：背景影片/圖片與媒體 cue（媒體檔不在 .pro 檔內）、特效、編曲順序。")
-    ups=st.file_uploader("上傳一個或多個 .pro", type=["pro"],
+    段落群組（名稱+顏色）、投影片標籤、熱鍵、備註、CCLI 也一併帶過去；
+    有內嵌路徑的背景/媒體元素轉成路徑引用。可加後處理（套樣式、繁簡）。"""
+    st.caption("上傳 ProPresenter 7 的 **.pro**（或整包 **.zip**），轉成 ProPresenter 6 能直接開的 "
+               "**.pro6**。保留：文字圖層（字體/字級/顏色/位置/對齊）、段落群組、標籤、熱鍵、"
+               "備註、CCLI；檔內帶路徑的背景媒體會轉成路徑引用。不轉：從媒體庫連結（檔內無路徑）"
+               "的背景、特效、編曲順序。")
+    ups=st.file_uploader("上傳一個或多個 .pro / .zip", type=["pro","zip"],
                          accept_multiple_files=True, key="conv_up")
     if not ups: return
+
+    # ── 後處理選項：轉完順便做，多檔一次出貨 ──────────────────
+    _oc1,_oc2=st.columns(2)
+    _cc=_oc1.selectbox("轉換後繁簡處理", ["不變","繁 → 簡","簡 → 繁"], key="conv_cc")
+    _sty="不套用"
+    if _STYLES:
+        _sty=_oc2.selectbox("轉換後套用樣式", ["不套用"]+list(_STYLES.keys()), key="conv_style")
+    with st.expander("進階：媒體路徑前綴替換（把原機路徑換成目標機路徑）"):
+        st.caption("只影響檔內帶路徑的背景/媒體元素。例：原 `/Users/newmediamac/Documents`"
+                   "、新 `/Users/mac/Documents`。留空＝不替換。")
+        _po=st.text_input("原路徑前綴", key="conv_path_old")
+        _pn=st.text_input("新路徑前綴", key="conv_path_new")
+    _path_map=(_po.strip(), _pn.strip()) if _po.strip() else None
+
     ok=[]                                        # (檔名stem, pro6 bytes)
-    for up in ups:
-        raw=up.getvalue(); stem=up.name.rsplit(".",1)[0]
+    for idx,(stem,raw) in enumerate(_collect_pro_files(ups)):
         try:
-            nb,rep=pro7.pro7_to_pro6(raw)
+            nb,rep=pro7.pro7_to_pro6(raw, path_map=_path_map)
+            post=[]
+            if _sty!="不套用":
+                nb,_sn=_apply_style(nb,_sty); post.append(f"樣式×{_sn}")
+            if _cc!="不變":
+                nb,_cn,_=_apply_tc2sc(nb, reverse=(_cc=="簡 → 繁")); post.append(f"繁簡×{_cn}")
         except Exception as e:
-            st.error(f"❌ **{up.name}**：{e}")
+            st.error(f"❌ **{stem}.pro**：{e}")
             continue
         ok.append((stem,nb))
         with st.container(border=True):
             c1,c2,c3=st.columns([4,1.2,1.2], vertical_alignment="center")
             gsum="、".join(f"{n}×{c}" for n,c in rep["groups"][:8])
             if len(rep["groups"])>8: gsum+="…"
+            _media=""
+            if rep.get("n_bg") or rep.get("n_media_el"):
+                _media=f"　·　背景 {rep.get('n_bg',0)} / 媒體元素 {rep.get('n_media_el',0)}"
             c1.markdown(f"✅ **{rep['title'] or stem}**　"
                         f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
                         f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
-                        +(f"　·　略過 {rep['n_skipped']} 個媒體/隱藏元素" if rep["n_skipped"] else "")
+                        +(f"　·　略過 {rep['n_skipped']} 個元素" if rep["n_skipped"] else "")
+                        +_media+("　·　"+"、".join(post) if post else "")
                         +f"<br>{gsum}</span>", unsafe_allow_html=True)
             c2.download_button("⬇ .pro6", nb, stem+".pro6", "application/xml",
-                               key=f"convdl_{up.name}_{len(nb)}", use_container_width=True)
-            if c3.button("✏️ 載入編輯", key=f"convload_{up.name}_{len(nb)}",
+                               key=f"convdl_{idx}_{stem}", use_container_width=True)
+            if c3.button("✏️ 載入編輯", key=f"convload_{idx}_{stem}",
                          use_container_width=True):
                 _request_new(nb, stem+".pro6")
     if len(ok)>1:                                # 多檔：加一鍵打包
@@ -2343,14 +2525,27 @@ with st.sidebar:
     if st.session_state.get("history"):
         st.caption("→ ".join(st.session_state["history"][-6:]))
     _undo=st.session_state.get("undo_stack", [])
-    if st.button("還原（復原上一步）", use_container_width=True,
-                 disabled=not _undo):
-        st.session_state["xml_content"]=zlib.decompress(_undo.pop())
-        if st.session_state.get("history"): st.session_state["history"].pop()
+    _redo=st.session_state.setdefault("redo_stack", [])
+    def _clear_widget_cache():
         for k in [k for k in st.session_state
                   if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
             st.session_state.pop(k, None)
-        st.rerun()
+    _uc,_rc=st.columns(2)
+    if _uc.button("↶", use_container_width=True, disabled=not _undo,
+                  help="還原（復原上一步）"):
+        _cur=st.session_state["xml_content"]
+        _lbl=st.session_state["history"].pop() if st.session_state.get("history") else ""
+        _redo.append((zlib.compress(_cur), _lbl))     # 現況入重做堆疊（連同歷史標籤）
+        st.session_state["xml_content"]=zlib.decompress(_undo.pop())
+        _clear_widget_cache(); st.rerun()
+    if _rc.button("↷", use_container_width=True, disabled=not _redo,
+                  help="重做（取消上一次還原）"):
+        _cur=st.session_state["xml_content"]
+        _nb,_lbl=_redo.pop()
+        _undo.append(zlib.compress(_cur))             # 直接 append，不經 _push_undo（那會清空重做）
+        st.session_state["xml_content"]=zlib.decompress(_nb)
+        if _lbl: st.session_state["history"].append(_lbl)
+        _clear_widget_cache(); st.rerun()
     st.divider()
     # 匯出區：放側欄最末＋sticky CSS 釘在底部，上方資訊區滾動時不動
     with st.container(key="sidebar_export"):
@@ -2379,16 +2574,19 @@ tab_parse, tab_tpl, tab_text, tab_new, tab_conv = st.tabs(
 # ─── TAB 1: 解析 ──────────────────────────────────────────────
 with tab_parse:
     st.caption("唯讀檢視整份檔。文件資訊見左側欄。")
-    for gname,gcolor,slides in _build_parse_display(xml_bytes):
-        c=gcolor
-        dot=(f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
-             f'background:{c};margin-right:5px;vertical-align:middle"></span>'
-             if c!="transparent" else "")
-        st.markdown(f'<p style="font-size:.75rem;font-weight:700;letter-spacing:.08em;'
-                    f'text-transform:uppercase;color:#555;margin:.6rem 0 .2rem">'
-                    f'{dot}{gname}</p>', unsafe_allow_html=True)
-        for _,text in slides:
-            st.code(text, language="")
+    if st.toggle("視覺預覽（按比例示意每張的排版，非精確渲染）", key="parse_preview"):
+        st.markdown(_render_preview_html(xml_bytes), unsafe_allow_html=True)
+    else:
+        for gname,gcolor,slides in _build_parse_display(xml_bytes):
+            c=gcolor
+            dot=(f'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
+                 f'background:{c};margin-right:5px;vertical-align:middle"></span>'
+                 if c!="transparent" else "")
+            st.markdown(f'<p style="font-size:.75rem;font-weight:700;letter-spacing:.08em;'
+                        f'text-transform:uppercase;color:#555;margin:.6rem 0 .2rem">'
+                        f'{dot}{gname}</p>', unsafe_allow_html=True)
+            for _,text in slides:
+                st.code(text, language="")
 
 
 # ─── TAB 2: 模板 ──────────────────────────────────────────────
@@ -2413,7 +2611,7 @@ with tab_tpl:
         _TPL_CAT={
             "prune_empty":"統整","tidy":"統整","prune_slides":"統整",
             "keep_first":"統整","del_last":"統整",
-            "tc2sc":"轉換","pinyin":"轉換",
+            "tc2sc":"轉換","pinyin":"轉換","find_replace":"轉換",
             "reverse_layers":"操作","split_lines":"操作","layers_to_slides":"操作",
             "add_layer":"操作","merge_runs":"操作","merge_rows":"操作",
             "batch_rename_layers":"操作",
@@ -2445,6 +2643,11 @@ with tab_tpl:
                                 value=True, key=f"mi2ni_{ti}")
                 elif action=="tc2sc":
                     st.checkbox("反向（簡→繁）", value=False, key=f"rev_{ti}")
+                elif action=="find_replace":
+                    st.text_input("搜尋", key=f"frs_{ti}", placeholder="要找的文字")
+                    st.text_input("取代為", key=f"frr_{ti}", placeholder="留空＝刪除")
+                    st.checkbox("正則表達式", value=False, key=f"frx_{ti}",
+                                help="開啟後「搜尋」當 regex、「取代為」可用 \\1 回代群組")
                 elif action=="prune_slides":
                     st.checkbox("保留只有背景影片/圖片的投影片",
                                 value=True, key=f"keepbg_{ti}")
@@ -2506,6 +2709,14 @@ with tab_tpl:
                             bnames=raw_bname.split("\n")
                             nb,n=_batch_rename_layers(src, bnames)
                             _commit(nb,n,f"已修改 {n} 個圖層名稱")
+                        elif action=="find_replace":
+                            nb,n,err=_find_replace(src,
+                                st.session_state.get(f"frs_{ti}",""),
+                                st.session_state.get(f"frr_{ti}",""),
+                                st.session_state.get(f"frx_{ti}",False))
+                            if err: st.error(err)
+                            elif n==0: st.info("找不到符合的文字，檔案未變動")
+                            else: _commit(nb,n,f"已取代 {n} 處")
                         elif action=="tc2sc":
                             rev=st.session_state.get(f"rev_{ti}", False)
                             nb,n,errs=_apply_tc2sc(src, rev)
@@ -2640,6 +2851,18 @@ def _write_tab():
         for k in [k for k in st.session_state if k.startswith(("hk_","ln_"))]:
             st.session_state.pop(k, None)
 
+    def _do_move(num, delta):
+        """上/下移一格：與相鄰投影片交換位置（跨段落會移進相鄰群組）。"""
+        xml=st.session_state["xml_content"]
+        nb,err=_move_slide(xml, num, delta)
+        if err: st.session_state["_text_err"]=err; return
+        _push_undo(); st.session_state["xml_content"]=nb
+        st.session_state["history"].append(f"移S{num}{'↑' if delta<0 else '↓'}")
+        for k in [k for k in st.session_state
+                  if k.startswith(("txt_","empty_","grp_","hk_","ln_"))]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
     def _swatch(hx):
         if not hx or hx=="?": return ""
         return (f'<span style="display:inline-block;width:10px;height:10px;border:1px solid #999;'
@@ -2670,6 +2893,12 @@ def _write_tab():
                             if st.button(f"{_GROUP_EMOJI[_gname]} {_gname}",
                                          key=f"grpbtn_{num}_{_gname}", use_container_width=True):
                                 _set_group(num, _gname, _ghex)
+                    if st.button("↑", key=f"mvup_{num}", help="上移一格（跨段落時會移進上一段）",
+                                 disabled=num==1):
+                        _do_move(num, -1)
+                    if st.button("↓", key=f"mvdn_{num}", help="下移一格（跨段落時會移進下一段）",
+                                 disabled=num==len(_slides_flat)):
+                        _do_move(num, 1)
                     if st.button("🗑", key=f"delbtn_{num}", help="刪除這張投影片"):
                         st.session_state["_del_ask"]=num; st.rerun()
             else:

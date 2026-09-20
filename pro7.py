@@ -34,9 +34,11 @@ Proto7.16.2）。本檔用到的路徑：
   HotKey.code: KeyCode enum，1..26=A..Z、27..36=0..9
 
 ── 已知取捨（轉不過去的東西）─────────────────────────────────────
-• 背景影片/圖片、媒體 cue、shape、特效、transition：略過（計入
-  report["n_skipped"]）。媒體檔本來就不在 .pro 檔裡，路徑也多半是
-  別台機器的，硬轉只會得到破圖示。
+• 背景媒體：cue 內嵌的媒體 action（Action.media=20 → MediaType.element=5
+  → Media.url=2）與元素層的 media fill（Element.fill=9 → Fill.media=3）
+  有 URL 就轉成 pro6 的 backgroundMediaCue／RVImage(Video)Element（路徑
+  引用；可用 path_map 換前綴）。從 media bin 以 UUID 連結、檔內沒有 URL
+  的（實測教會檔多屬此類）無從轉起，略過。shape、特效、transition 略過。
 • Pro7 的 arrangements（編曲順序）：忽略，依文件原始順序輸出。
 • Cue.isEnabled 是 proto3 bool，寫 false 時欄位直接省略、無從與
   「未設定」區分——一律輸出 enabled="true"。
@@ -46,6 +48,7 @@ import base64
 import re
 import struct
 import uuid as _uuid_mod
+from urllib.parse import quote
 
 __all__ = ["is_pro7", "parse_pro7", "pro7_to_pro6", "Pro7Error"]
 
@@ -176,6 +179,50 @@ def _rtf_plain(rtf_bytes: bytes) -> str:
             out.append("\n")
     return "".join(out).strip()
 
+_VIDEO_EXT = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mpg", ".mpeg")
+_AUDIO_EXT = (".mp3", ".m4a", ".wav", ".aac", ".aiff", ".flac")
+
+def _url_str(url_msg) -> str:
+    """rv.data.URL → 路徑字串（優先 absolute_string，其次 relative_path /
+    local.path）；無則空字串。"""
+    if not url_msg: return ""
+    s = _str(url_msg, 1) or _str(url_msg, 2)
+    if not s:
+        s = _str(_sub(url_msg, 4), 2)      # LocalRelativePath.path
+    return s
+
+def _to_file_url(s: str) -> str:
+    """路徑 → pro6 的 file:// URL（已是 URL 則原樣；純路徑補 scheme＋percent-encode）。"""
+    if not s or "://" in s: return s
+    return "file://" + quote(s, safe="/")
+
+def _media_kind(path: str, media_msg=None, action_media=None) -> str:
+    """判斷媒體種類：先看 oneof（Media TypeProperties 4/5/6、MediaType 6/7/8），
+    再退回副檔名。回傳 'video' / 'image' / 'audio'。"""
+    if media_msg is not None:
+        if 6 in media_msg: return "video"
+        if 5 in media_msg: return "image"
+        if 4 in media_msg: return "audio"
+    if action_media is not None:
+        if 7 in action_media: return "video"
+        if 6 in action_media: return "image"
+        if 8 in action_media: return "audio"
+    low = path.lower()
+    if low.endswith(_VIDEO_EXT): return "video"
+    if low.endswith(_AUDIO_EXT): return "audio"
+    return "image"
+
+def _media_from_action(act) -> dict:
+    """Action 內的媒體（背景 cue 用）：有 URL 才回 {kind,url,name}；否則 None。"""
+    am = _sub(act, 20)                      # Action.media (MediaType)
+    if not am: return None
+    el = _sub(am, 5)                        # MediaType.element (rv.data.Media)
+    url = _url_str(_sub(el, 2))
+    if not url: return None                 # media bin 連結（無 URL）→ 轉不了
+    kind = _media_kind(url, el, am)
+    if kind == "audio": return None         # pro6 背景 cue 不收音訊
+    return {"kind": kind, "url": url, "name": _str(act, 2)}
+
 def is_pro7(raw: bytes, name: str = "") -> bool:
     """這份 bytes 是不是 Pro7 的 .pro protobuf？
     XML（pro6）以 '<' 或 BOM+'<' 開頭；protobuf 開頭是 field 1 的 tag(0x0A)。
@@ -222,13 +269,16 @@ def parse_pro7(data: bytes) -> dict:
         hot = _KEYCODE.get(_varint(_sub(cue, 8), 1), "")
         label = _str(cue, 2)
         pres = None
-        for act in _subs(cue, 10):       # 找第一個帶投影片的 action
-            st_ = _sub(act, 23)
-            p = _sub(st_, 2)
-            if p:
-                pres = p
-                if not label: label = _str(_sub(act, 3), 2)   # Action.Label.text
-                break
+        bg = None
+        for act in _subs(cue, 10):       # 掃全部 action：投影片＋（可能的）背景媒體
+            if pres is None:
+                p = _sub(_sub(act, 23), 2)
+                if p:
+                    pres = p
+                    if not label: label = _str(_sub(act, 3), 2)   # Action.Label.text
+                    continue
+            if bg is None:
+                bg = _media_from_action(act)
         if pres is None:
             return None                  # 非投影片 cue（純媒體/音訊等）→ 跳過
         base = _sub(pres, 1)
@@ -245,6 +295,8 @@ def parse_pro7(data: bytes) -> dict:
             rtf = _bytes(text, 5)
             bounds = _sub(el, 3)
             org = _sub(bounds, 1); siz = _sub(bounds, 2)
+            fill_media = _sub(_sub(el, 9), 3)              # Element.fill → Fill.media
+            murl = _url_str(_sub(fill_media, 2))
             elements.append({
                 "uuid":   _uuid_str(el, 1) or str(_uuid_mod.uuid4()).upper(),
                 "name":   _str(el, 2),
@@ -254,8 +306,10 @@ def parse_pro7(data: bytes) -> dict:
                 "rtf":    rtf,
                 "hidden": bool(_varint(el, 16)),
                 "has_text": bool(rtf.strip()),
+                "media_url":  murl,
+                "media_kind": _media_kind(murl, fill_media) if murl else "",
             })
-            if not rtf.strip(): n_media += 1
+            if not rtf.strip() and not murl: n_media += 1
         return {
             "uuid":     _uuid_str(base, 7) or str(_uuid_mod.uuid4()).upper(),
             "label":    label,
@@ -265,6 +319,7 @@ def parse_pro7(data: bytes) -> dict:
             "draws_bg": bool(_varint(base, 4)),
             "elements": elements,
             "n_media":  n_media,
+            "bg":       bg,
         }
 
     # ── 重點：顯示順序＝cue_groups 的順序 ＋ 各組 cue_identifiers 的順序。
@@ -342,23 +397,91 @@ def _text_element_xml(el: dict) -> str:
             f'<NSString rvXMLIvarName="RTFData">{b64}</NSString>'
             '</RVTextElement>')
 
-def _slide_xml(sl: dict) -> str:
-    els = "".join(_text_element_xml(e) for e in sl["elements"]
-                  if e["has_text"] and not e["hidden"])
+def _map_url(url: str, path_map) -> str:
+    """套用路徑前綴替換（同時試 raw 與 percent-encoded 兩種寫法），再轉 file:// URL。"""
+    if path_map and path_map[0]:
+        old, new = path_map
+        url = url.replace(old, new)
+        qold, qnew = quote(old, safe="/:"), quote(new, safe="/:")
+        if qold != old: url = url.replace(qold, qnew)
+    return _to_file_url(url)
+
+# 影片/圖片元素的共用屬性（模板取自實際 ProPresenter 6 檔；時長/幀率未知，
+# 填中性預設值——Pro6 開檔後會依實際媒體重讀）
+def _video_element_xml(url, name, x, y, w, h, ivar) -> str:
+    return (f'<RVVideoElement UUID="{str(_uuid_mod.uuid4()).upper()}" audioVolume="1.000000" '
+            'bezelRadius="0.000000" displayDelay="0.000000" displayName="'+_esc(name or "VideoElement")+'" '
+            'drawingFill="false" drawingShadow="false" drawingStroke="false" endPoint="0" '
+            'fieldType="0" fillColor="" flippedHorizontally="false" flippedVertically="false" '
+            'format="" frameRate="0.000000" fromTemplate="false" imageOffset="{0, 0}" inPoint="0" '
+            'locked="false" manufactureName="" manufactureURL="" naturalSize="{'+f"{w}, {h}"+'}" '
+            'opacity="1.000000" outPoint="0" persistent="false" playRate="1.000000" '
+            'playbackBehavior="1" rotation="0.000000" '
+            + (f'rvXMLIvarName="{ivar}" ' if ivar else '') +
+            f'scaleBehavior="3" scaleSize="{{1, 1}}" source="{_esc(url)}" timeScale="600" typeID="0">'
+            f'<RVRect3D rvXMLIvarName="position">{{{x} {y} 0 {w} {h}}}</RVRect3D>'
+            '<shadow rvXMLIvarName="shadow">0.000000|0 0 0 0|{4, -4}</shadow>'
+            '<dictionary rvXMLIvarName="stroke">'
+            '<NSColor rvXMLDictionaryKey="RVShapeElementStrokeColorKey">0 0 0 0</NSColor>'
+            '<NSNumber hint="integer" rvXMLDictionaryKey="RVShapeElementStrokeWidthKey">0</NSNumber>'
+            '</dictionary></RVVideoElement>')
+
+def _image_element_xml(url, name, x, y, w, h, ivar) -> str:
+    return (f'<RVImageElement UUID="{str(_uuid_mod.uuid4()).upper()}" bezelRadius="0.000000" '
+            'displayDelay="0.000000" displayName="'+_esc(name or "ImageElement")+'" '
+            'drawingFill="false" drawingShadow="false" drawingStroke="false" fillColor="" '
+            'flippedHorizontally="false" flippedVertically="false" format="" fromTemplate="false" '
+            'imageOffset="{0, 0}" locked="false" manufactureName="" manufactureURL="" '
+            'opacity="1.000000" persistent="false" rotation="0.000000" '
+            + (f'rvXMLIvarName="{ivar}" ' if ivar else '') +
+            f'scaleBehavior="3" scaleSize="{{1, 1}}" source="{_esc(url)}" typeID="0">'
+            f'<RVRect3D rvXMLIvarName="position">{{{x} {y} 0 {w} {h}}}</RVRect3D>'
+            '<shadow rvXMLIvarName="shadow">0.000000|0 0 0 0|{4, -4}</shadow>'
+            '<dictionary rvXMLIvarName="stroke">'
+            '<NSColor rvXMLDictionaryKey="RVShapeElementStrokeColorKey">0 0 0 0</NSColor>'
+            '<NSNumber hint="integer" rvXMLDictionaryKey="RVShapeElementStrokeWidthKey">0</NSNumber>'
+            '</dictionary></RVImageElement>')
+
+def _media_cue_xml(bg: dict, w: int, h: int, path_map) -> str:
+    url = _map_url(bg["url"], path_map)
+    name = bg["name"] or url.rsplit("/", 1)[-1]
+    if bg["kind"] == "video":
+        el = _video_element_xml(url, name, 0, 0, w, h, "element")
+    else:
+        el = _image_element_xml(url, name, 0, 0, w, h, "element")
+    return (f'<RVMediaCue UUID="{str(_uuid_mod.uuid4()).upper()}" actionType="0" alignment="4" '
+            f'behavior="1" dateAdded="" delayTime="0.000000" displayName="{_esc(name)}" '
+            'enabled="true" nextCueUUID="" rvXMLIvarName="backgroundMediaCue" tags="" '
+            f'timeStamp="0.000000">{el}</RVMediaCue>')
+
+def _slide_xml(sl: dict, doc_w: int, doc_h: int, path_map=None) -> str:
+    parts = []
+    for e in sl["elements"]:
+        if e["hidden"]: continue
+        if e["has_text"]:
+            parts.append(_text_element_xml(e))
+        elif e["media_url"]:
+            url = _map_url(e["media_url"], path_map)
+            fn = _video_element_xml if e["media_kind"] == "video" else _image_element_xml
+            parts.append(fn(url, e["name"], e["x"], e["y"], e["w"], e["h"], ""))
+    cue = _media_cue_xml(sl["bg"], doc_w, doc_h, path_map) if sl.get("bg") else ""
     return (f'<RVDisplaySlide UUID="{sl["uuid"]}" backgroundColor="{sl["bg_color"]}" '
             f'chordChartPath="" drawingBackgroundColor="{"true" if sl["draws_bg"] else "false"}" '
             f'enabled="true" highlightColor="0 0 0 0" hotKey="{_esc(sl["hotkey"])}" '
             f'label="{_esc(sl["label"])}" notes="{_esc(sl["notes"])}" socialItemCount="1">'
             '<array rvXMLIvarName="cues"></array>'
-            f'<array rvXMLIvarName="displayElements">{els}</array>'
+            + cue +
+            f'<array rvXMLIvarName="displayElements">{"".join(parts)}</array>'
             '</RVDisplaySlide>')
 
-def _doc_xml(model: dict) -> bytes:
+def _doc_xml(model: dict, path_map=None) -> bytes:
     c = model["ccli"]
     gs = "".join(
         f'<RVSlideGrouping name="{_esc(g["name"])}" color="{g["color"]}" '
         f'uuid="{str(_uuid_mod.uuid4()).upper()}">'
-        f'<array rvXMLIvarName="slides">{"".join(_slide_xml(s) for s in g["slides"])}</array>'
+        f'<array rvXMLIvarName="slides">'
+        f'{"".join(_slide_xml(s, model["width"], model["height"], path_map) for s in g["slides"])}'
+        '</array>'
         '</RVSlideGrouping>' for g in model["groups"])
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
@@ -382,10 +505,12 @@ def _doc_xml(model: dict) -> bytes:
         '</RVPresentationDocument>').encode("utf-8")
 
 
-def pro7_to_pro6(data: bytes) -> tuple:
+def pro7_to_pro6(data: bytes, path_map=None) -> tuple:
     """Pro7 .pro bytes → (pro6 XML bytes, report dict)。
+    path_map=(舊前綴, 新前綴)：套用到所有媒體路徑（背景 cue 與媒體元素）。
     report: title / width / height / n_groups / n_slides / n_text /
-            n_skipped（略過的媒體、隱藏或無文字元素數）/ groups=[(名, 張數)]"""
+            n_bg（帶出的背景媒體 cue）/ n_media_el（帶出的媒體元素）/
+            n_skipped（無 URL 或隱藏而略過的元素數）/ groups=[(名, 張數)]"""
     model = parse_pro7(data)
     n_slides = sum(len(g["slides"]) for g in model["groups"])
     if n_slides == 0:
@@ -393,12 +518,18 @@ def pro7_to_pro6(data: bytes) -> tuple:
     n_text = sum(1 for g in model["groups"] for s in g["slides"]
                  for e in s["elements"] if e["has_text"] and not e["hidden"])
     n_skip = sum(1 for g in model["groups"] for s in g["slides"]
-                 for e in s["elements"] if not e["has_text"] or e["hidden"])
+                 for e in s["elements"]
+                 if e["hidden"] or (not e["has_text"] and not e["media_url"]))
+    n_bg = sum(1 for g in model["groups"] for s in g["slides"] if s.get("bg"))
+    n_media_el = sum(1 for g in model["groups"] for s in g["slides"]
+                     for e in s["elements"]
+                     if not e["hidden"] and not e["has_text"] and e["media_url"])
     report = {
         "title":    model["title"] or model["ccli"]["title"],
         "width":    model["width"], "height": model["height"],
         "n_groups": len(model["groups"]), "n_slides": n_slides,
         "n_text":   n_text, "n_skipped": n_skip,
+        "n_bg":     n_bg,   "n_media_el": n_media_el,
         "groups":   [(g["name"] or "(無名)", len(g["slides"])) for g in model["groups"]],
     }
-    return _doc_xml(model), report
+    return _doc_xml(model, path_map), report

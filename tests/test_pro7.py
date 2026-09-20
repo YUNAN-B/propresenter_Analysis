@@ -163,6 +163,44 @@ def test_bad_input():
         pro7.parse_pro7(b"\xff\xff\xff")              # 壞 protobuf
 
 
+def _media_action(url, video=True):
+    """帶內嵌 URL 的媒體 action：media=20{ element=5(Media{url=2{abs=1}}),
+    video=7/image=6(空 oneof 標記) }。"""
+    media_el = _len(2, _str(1, url))                       # Media{url=2{absolute=1}}
+    mt = _len(5, media_el) + _len(7 if video else 6, b"")
+    return _len(20, mt) + _int(9, 2)                       # type=ACTION_TYPE_MEDIA
+
+def _fill_media_el(uuid_s, url, x, y, w, h):
+    """元素層 media fill（圖片元素）：Element.fill=9{ Fill.media=3(Media) }。"""
+    bounds = _len(1, _dbl(1, x) + _dbl(2, y)) + _len(2, _dbl(1, w) + _dbl(2, h))
+    fill = _len(3, _len(2, _str(1, url)))
+    g_el = _uuid(1, uuid_s) + _str(2, "BG圖") + _len(3, bounds) + _len(9, fill)
+    return _len(1, g_el)
+
+def test_media_conversion(app):
+    cue_body = (_uuid(1, "CUE-M")
+                + _len(10, _len(23, _len(2, _slide("SL-M", [
+                      _text_el("EL-M", "中文", 0, 0, 1920, 1080),
+                      _fill_media_el("EL-IMG", "/Users/old/pics/bg.jpg", 0, 0, 1920, 1080),
+                  ]))) + _int(9, 11))
+                + _len(10, _media_action("file:///Users/old/movs/bg.mp4", video=True)))
+    doc = (_len(1, _int(1, 1)) + _str(3, "媒體測試")
+           + _len(12, _group("Verse", (0.2, 0.4, 0.9, 1.0), ["CUE-M"]))
+           + _len(13, cue_body))
+    nb, rep = pro7.pro7_to_pro6(doc, path_map=("/Users/old", "/Users/new"))
+    assert rep["n_bg"] == 1 and rep["n_media_el"] == 1 and rep["n_skipped"] == 0
+    root = ET.fromstring(nb.decode("utf-8"))
+    cue = root.find('.//RVMediaCue[@rvXMLIvarName="backgroundMediaCue"]')
+    assert cue is not None
+    vid = cue.find('RVVideoElement[@rvXMLIvarName="element"]')
+    assert vid is not None and vid.get("source") == "file:///Users/new/movs/bg.mp4"
+    img = root.find(".//RVImageElement")
+    assert img is not None and img.get("rvXMLIvarName") is None
+    assert img.get("source") == "file:///Users/new/pics/bg.jpg"   # 純路徑→file:// URL＋前綴替換
+    # 全管線仍可解析
+    _meta, groups = app._parse_xml(nb)
+    assert sum(len(g["slides"]) for g in groups) == 1
+
 def test_load_new_doc_autoconverts(app, synth_pro):
     """app._load_new_doc 收到 .pro 時要自動轉檔載入（檔名改 .pro6、留下來源註記）。"""
     ss = app.st.session_state
