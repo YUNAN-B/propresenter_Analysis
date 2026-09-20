@@ -2037,6 +2037,12 @@ html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 [class*="st-key-grpbtn_"] button{padding:.1rem .5rem;min-height:0;}
 /* 圖層命名：緊湊單行輸入框 */
 [class*="st-key-ln_"] input{font-size:.78rem;padding:.15rem .4rem;height:1.8rem;}
+/* 還原/重做箭頭：放大加粗，看得清楚 */
+[class*="st-key-undo_btn"] button p,[class*="st-key-redo_btn"] button p{
+  font-size:1.45rem!important;font-weight:700;line-height:1;}
+[class*="st-key-undo_btn"] button,[class*="st-key-redo_btn"] button{
+  padding-top:.2rem!important;padding-bottom:.2rem!important;}
+
 /* 刪除鈕與上下移鈕：與熱鍵同尺寸的正方形 */
 [class*="st-key-delbtn_"],[class*="st-key-mvup_"],[class*="st-key-mvdn_"]{flex:0 0 auto!important;}
 [class*="st-key-delbtn_"] button,[class*="st-key-mvup_"] button,[class*="st-key-mvdn_"] button{
@@ -2540,14 +2546,14 @@ with st.sidebar:
                   if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
             st.session_state.pop(k, None)
     _uc,_rc=st.columns(2)
-    if _uc.button("⟲", use_container_width=True, disabled=not _undo,
+    if _uc.button("⟲", key="undo_btn", use_container_width=True, disabled=not _undo,
                   help="還原（復原上一步）"):
         _cur=st.session_state["xml_content"]
         _lbl=st.session_state["history"].pop() if st.session_state.get("history") else ""
         _redo.append((zlib.compress(_cur), _lbl))     # 現況入重做堆疊（連同歷史標籤）
         st.session_state["xml_content"]=zlib.decompress(_undo.pop())
         _clear_widget_cache(); st.rerun()
-    if _rc.button("⟳", use_container_width=True, disabled=not _redo,
+    if _rc.button("⟳", key="redo_btn", use_container_width=True, disabled=not _redo,
                   help="重做（取消上一次還原）"):
         _cur=st.session_state["xml_content"]
         _nb,_lbl=_redo.pop()
