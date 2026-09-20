@@ -24,7 +24,11 @@ S__*.jpg
 
 # 個人測試用的 ProPresenter 檔（根目錄；tests/fixtures 的合成檔不受影響）
 /*.pro6
+/*.pro
 /*.xml
+
+# 教會實機資料備份（1.5GB 媒體，不入版控）
+/ProPresenter/
 
 # Streamlit 本機暫存設定
 .streamlit/credentials.toml
