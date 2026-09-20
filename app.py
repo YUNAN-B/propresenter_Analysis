@@ -2536,7 +2536,6 @@ with st.sidebar:
             _sep="" if all(c<10 for c in g["layers"]) else ","
             _rows.append(f"|{_dot}{g['name']}|{g['n']}|{_sep.join(map(str,g['layers']))}|")
         st.markdown("\n".join(_rows), unsafe_allow_html=True)
-    st.divider()
     if st.session_state.get("history"):
         st.caption("→ ".join(st.session_state["history"][-6:]))
     _undo=st.session_state.get("undo_stack", [])
@@ -2561,8 +2560,8 @@ with st.sidebar:
         st.session_state["xml_content"]=zlib.decompress(_nb)
         if _lbl: st.session_state["history"].append(_lbl)
         _clear_widget_cache(); st.rerun()
-    st.divider()
-    # 匯出區：放側欄最末＋sticky CSS 釘在底部，上方資訊區滾動時不動
+    # 匯出區：放側欄最末＋sticky CSS 釘在底部（自帶上邊線，區隔不靠 divider）
+    # 上方資訊區滾動時不動
     with st.container(key="sidebar_export"):
         default_name=st.session_state["filename"].rsplit(".",1)[0]
         out_name=st.text_input("匯出檔名", key="export_name").strip() or default_name
