@@ -1768,7 +1768,7 @@ def _delete_slide_by_num(xml_bytes: bytes, num: int) -> tuple:
 
 # 分頁圖示(favicon)：工程帽。page_icon 接受字串路徑，錨定腳本目錄避免雲端 CWD 差異
 # ⋮ 選單「關於此工具」內容
-_ABOUT_TEXT = """### ProParse · 投影片解析
+_ABOUT_TEXT = r"""### ProParse · 投影片解析
 
 給投影同工的 ProPresenter 批次工具：**上傳 → 修改 → 匯出**，全程在瀏覽器完成，
 你電腦裡的原始檔不會被動到（修改只存在網頁裡，按「匯出」才會產生新檔案）。
