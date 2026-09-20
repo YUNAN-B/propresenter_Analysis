@@ -74,8 +74,8 @@ ProParse · 投影片解析 · Streamlit App
 ── 其他要知道的 ────────────────────────────────────────────────────
 • 快取：_doc_summary（側邊欄用）回純資料、可 @st.cache_data；_parse_xml 含 TextRun
   dataclass 無法穩定 pickle，故不快取（每次重解析，夠快）。
-• 卡住自救：工具列設 minimal（藏掉內建 Clear cache），故側邊欄有「🔄 重設」(_soft_reset)
-  清全域快取＋暫態旗標；_commit_change 存檔前先驗證 XML 合法，壞檔不入狀態。
+• 卡住自救：_soft_reset 清全域快取＋暫態旗標（僅在「檔案無法解析」的保險絲頁
+  提供按鈕）；_commit_change 存檔前先驗證 XML 合法，壞檔不入狀態。
 • 上傳識別碼 _fk 用「原始檔長度」，必須在 _normalize_preset_groups 之前算（見該處註解）。
 • 匯出時自動修復重複 UUID（_dedup_uuids）。
 
@@ -1784,7 +1784,7 @@ ProPresenter 6（.pro6）投影片的批次檢視與編輯工具，特別適合�
   文字圖層走「RTF 原封搬運」，字體/字級/顏色/斷行/位置全保留；段落群組、標籤、
   熱鍵、備註、CCLI 一併帶過；背景媒體與特效不轉（媒體檔本來就不在 .pro 內）。
 
-編輯後從左側欄匯出 .pro6；卡住時點左側欄「🔄 重設」。
+編輯後從左側欄匯出 .pro6。
 
 ---
 
@@ -2368,10 +2368,6 @@ with st.sidebar:
             st.session_state.pop(k, None)
         st.rerun()
     st.divider()
-    # 卡住自救：清全域快取＋暫態旗標、還原到剛載入的檔（不丟掉已上傳的檔）
-    if st.button("🔄 卡住了？重設", use_container_width=True,
-                 help="清除快取與暫存狀態、把檔案還原到剛載入時。操作後若怪怪的、重新整理也沒用時點這個。"):
-        _soft_reset()
     # 匯出區：放側欄最末＋sticky CSS 釘在底部，上方資訊區滾動時不動
     with st.container(key="sidebar_export"):
         default_name=st.session_state["filename"].rsplit(".",1)[0]
@@ -2541,7 +2537,7 @@ with tab_tpl:
                                 else:
                                     _commit(nb,n,f"已把 {n} 張的拼音寫入第二層（引擎：{engine}）")
                     except Exception as e:
-                        st.error(f"套用時發生問題：{e}（檔案未變動，可改用側邊欄「🔄 卡住了？重設」）")
+                        st.error(f"套用時發生問題：{e}（檔案未變動）")
 
     # ── 第三部分：大量填入文字（每頁一行，依序填入指定圖層）──────────
     st.divider()
@@ -2581,7 +2577,7 @@ with tab_tpl:
                 else:
                     _commit_change("大量填入", _bnb, _bn, f"已把文字填入 {_bn} 張投影片")
             except Exception as e:
-                st.error(f"填入時發生問題：{e}（檔案未變動，可改用側邊欄「🔄 卡住了？重設」）")
+                st.error(f"填入時發生問題：{e}（檔案未變動）")
 
 
 # ─── TAB 3: 撰寫（逐段編輯明文，失焦自動儲存）─────────────────
