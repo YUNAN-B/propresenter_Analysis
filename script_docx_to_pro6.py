@@ -147,7 +147,8 @@ def main(path):
     title, items, warnings = parse_script(paras)
     items, n_split = _apply_splits(items, _load_splits())
     if n_split: print(f"   已套用長句切分：{n_split} 句 → 各拆兩張")
-    title = title or os.path.basename(path).rsplit(".", 1)[0]
+    # 無 Title: 行時退回檔名（去掉「_中英對照」尾綴，如第四幕）
+    title = title or os.path.basename(path).rsplit(".", 1)[0].replace("_中英對照", "")
     xml = build_pro6(title, items)
     out = os.path.join(os.path.dirname(os.path.abspath(path)) or ".", f"{title}_台詞.pro6")
     with open(out, "wb") as f: f.write(xml)

@@ -1,38 +1,413 @@
 {
-  "_說明": "台詞切分表：key＝docx 原始中文句（完全比對），value＝切開後的 [中文, 英文] 清單。英文為空字串＝該半句不出英文張。只切不改字。",
-
-  "對啊 這太陽怎麼一直跟著我們呀": [["對啊", ""], ["這太陽怎麼一直跟著我們呀", "Why does it keep following us?"]],
-  "不過你要相信上帝帶我們到這邊": [["不過你要相信", "But I trust that"], ["上帝帶我們到這邊", "God brought us here."]],
-  "嘿 先生 請問一下百忍街要怎麼走啊": [["嘿 先生 請問一下", "Excuse me, sir."], ["百忍街要怎麼走啊", "How do I get to Bairen Street?"]],
-  "我都快比郵差更熟悉這個地方了": [["我都快比郵差", "I know this place"], ["更熟悉這個地方了", "better than the postman now."]],
-  "要不然連我們要吃什麼都不知道了": [["要不然", "Otherwise,"], ["連我們要吃什麼都不知道了", "I don't know what we'd eat."]],
-  "我今天有請那個會友來家裡團契": [["我今天有請那個會友", "I invited some church members"], ["來家裡團契", "over for fellowship today."]],
-  "每一次都是可以從這些變出食物來的": [["每一次都是可以", "I always find a way"], ["從這些變出食物來的", "to make a meal from these."]],
-  "你上次要我背的詩篇23篇我已經全部背起來了": [["你上次要我背的詩篇23篇", "I've memorized all of Psalm 23,"], ["我已經全部背起來了", "like you asked me to."]],
-  "耶和華是我的牧者 我必不至缺乏 他使我躺臥": [["耶和華是我的牧者", "The Lord is my shepherd;"], ["我必不至缺乏 他使我躺臥", "I shall not want. He makes me lie down..."]],
-  "張哥啊 下禮拜我也可以帶我朋友來嗎": [["張哥啊", "Brother Zhang,"], ["下禮拜我也可以帶我朋友來嗎", "can I bring my friend next week?"]],
-  "我要讓我朋友嚐嚐師母那滷到透的東坡肉": [["我要讓我朋友嚐嚐", "I want my friend to try"], ["師母那滷到透的東坡肉", "Pastor's wife's tasty Dongpo pork."]],
-  "對了牧師 你上次來探訪 我身旁的人都說超羨慕的": [["對了牧師 你上次來探訪", "Pastor, when you visited me,"], ["我身旁的人都說超羨慕的", "everyone around me was jealous."]],
-  "你們下次都把他們統統一起帶來聚會好不好": [["你們下次都把他們", "Bring them all"], ["統統一起帶來聚會好不好", "to the Sunday service next time, okay?"]],
-  "俗話說的好 天下沒有白吃的午餐": [["俗話說的好", "As the saying goes,"], ["天下沒有白吃的午餐", "there's no free lunch."]],
-  "今天呀 我就要你們陪我一起去發單張": [["今天呀 我就要你們", "Today, you're coming with me"], ["陪我一起去發單張", "to pass out flyers."]],
-  "有你們一起發我們也比較不孤單": [["有你們一起發", "With you coming along,"], ["我們也比較不孤單", "we won't feel so alone."]],
-  "你們是不是沒跟牧師一起發過單張對吧": [["你們是不是沒跟牧師", "You've never passed out flyers"], ["一起發過單張對吧", "with Pastor before right?"]],
-  "走 這一次讓我們跟牧師一起去傳福音吧": [["走 這一次", "Come on,"], ["讓我們跟牧師一起去傳福音吧", "let's share the gospel with Pastor this time."]],
-  "我相信啊 這禮拜一定會有很多人來參加聚會": [["我相信啊 這禮拜", "I'm sure"], ["一定會有很多人來參加聚會", "lots of people will come to the service this week."]],
-  "當然還要謝謝有這麼多弟兄姊妹的幫忙": [["當然還要謝謝", "And of course, we have to thank"], ["有這麼多弟兄姊妹的幫忙", "all the brothers and sisters who have helped."]],
-  "各位弟兄姊妹 我們稍微集合一下": [["各位弟兄姊妹", "Brothers and sisters,"], ["我們稍微集合一下", "let’s gather around."]],
-  "今天你們兩個就跟著羅伯伯一起去做招待": [["今天你們兩個", "You two"], ["就跟著羅伯伯一起去做招待", "will help Uncle Luo with the ushering today"]],
-  "整理一下 椅子再幫忙排整齊好不好": [["整理一下", "and tidy up."], ["椅子再幫忙排整齊好不好", "Please straighten the chairs too."]],
-  "王伯伯都是在外面抽完煙才會進來的": [["王伯伯都是", "Uncle Wang always"], ["在外面抽完煙才會進來的", "finishes his cigarette outside before coming in."]],
-  "今天唱駱駝 我剛才也是抽駱駝（駱駝牌香菸）": [["今天唱駱駝", "Today we'll sing “Camel.”"], ["我剛才也是抽駱駝（駱駝牌香菸）", "I just smoked a Camel, too. (Camel cigarettes)"]],
-  "看你們這個樣子啊 也不用再努力了啦": [["看你們這個樣子啊", "Look at you guys."], ["也不用再努力了啦", "Don't bother trying anymore."]],
-  "你們三個月就要關門了 不如早點關好了": [["你們三個月就要關門了", "You'll close in three months."], ["不如早點關好了", "Might as well close now."]],
-  "嘿弟兄 你記得上次和你分享的四律嗎": [["嘿弟兄 你記得", "Brother, remember"], ["上次和你分享的四律嗎", "the Four Spiritual Laws I shared with you?"]],
-  "有 我決定要去比較大的教會受洗 比較好看": [["有 我決定要去", "Yes."], ["比較大的教會受洗 比較好看", "At a bigger church. It'll look better there."]],
-  "這已經是這個月第三次了 好危險的": [["這已經是這個月第三次了", "That's the third time this month."], ["好危險的", "It's dangerous!"]],
-  "是羅伯伯幫我們向差會借一千塊美金": [["是羅伯伯幫我們", "Uncle Luo helped us"], ["向差會借一千塊美金", "borrow 1,000 US dollars from the mission board."]],
-  "因為我怕我做之後 他們就再也不來教會": [["因為我怕我做之後", "I was afraid"], ["他們就再也不來教會", "they'd never come back to church."]],
-  "父親做不好 教會又做不好 丈夫也做不好": [["父親做不好 教會又做不好", "I failed as a father, a pastor,"], ["丈夫也做不好", "and a husband."]],
-  "你當剛強壯膽 不要懼怕 也不要驚惶": [["你當剛強壯膽", "Be strong and courageous."], ["不要懼怕 也不要驚惶", "Do not be afraid or discouraged."]]
+ "_說明": "台詞切分表（以英文長度為準：≥50 字元才切；中英同點切、一一對照、只切不改字）。key＝docx 原始中文句，value＝[[中,英]…]。",
+ "還要給爸媽的錢 跟牧養的費用": [
+  [
+   "還要給爸媽的錢",
+   "Rest of the money is for our parents"
+  ],
+  [
+   "跟牧養的費用",
+   "and the ministry."
+  ]
+ ],
+ "我今天有請那個會友來家裡團契": [
+  [
+   "我今天有請那個會友",
+   "I invited some church members"
+  ],
+  [
+   "來家裡團契",
+   "over for fellowship today."
+  ]
+ ],
+ "我們家 有五餅二魚的恩典": [
+  [
+   "我們家",
+   "We have the grace"
+  ],
+  [
+   "有五餅二魚的恩典",
+   "of the five loaves and two fish."
+  ]
+ ],
+ "你上次要我背的詩篇23篇我已經全部背起來了": [
+  [
+   "你上次要我背的詩篇23篇",
+   "I've memorized all of Psalm 23,"
+  ],
+  [
+   "我已經全部背起來了",
+   "like you asked me to."
+  ]
+ ],
+ "耶和華是我的牧者 我必不至缺乏 他使我躺臥": [
+  [
+   "耶和華是我的牧者 我必不至缺乏",
+   "The Lord is my shepherd; I shall not want."
+  ],
+  [
+   "他使我躺臥",
+   "He makes me lie down..."
+  ]
+ ],
+ "我要讓我朋友嚐嚐師母那滷到透的東坡肉": [
+  [
+   "我要讓我朋友嚐嚐",
+   "I want my friend to try"
+  ],
+  [
+   "師母那滷到透的東坡肉",
+   "Pastor's wife's tasty Dongpo pork."
+  ]
+ ],
+ "對了牧師 你上次來探訪 我身旁的人都說超羨慕的": [
+  [
+   "對了牧師 你上次來探訪",
+   "Pastor, when you visited me,"
+  ],
+  [
+   "我身旁的人都說超羨慕的",
+   "everyone around me was jealous."
+  ]
+ ],
+ "你們下次都把他們統統一起帶來聚會好不好": [
+  [
+   "你們下次都把他們",
+   "Bring them all"
+  ],
+  [
+   "統統一起帶來聚會好不好",
+   "to the Sunday service next time, okay?"
+  ]
+ ],
+ "你們是不是沒跟牧師一起發過單張對吧": [
+  [
+   "你們是不是沒跟牧師",
+   "You've never passed out flyers"
+  ],
+  [
+   "一起發過單張對吧",
+   "with Pastor before right?"
+  ]
+ ],
+ "走 這一次讓我們跟牧師一起去傳福音吧": [
+  [
+   "走 這一次",
+   "Come on,"
+  ],
+  [
+   "讓我們跟牧師一起去傳福音吧",
+   "let's share the gospel with Pastor this time."
+  ]
+ ],
+ "發了三民路 中正路 還有百忍街": [
+  [
+   "發了三民路 中正路",
+   "We've covered Sanmin Road, Zhongzheng Road,"
+  ],
+  [
+   "還有百忍街",
+   "and Bairen Street."
+  ]
+ ],
+ "我相信啊 這禮拜一定會有很多人來參加聚會": [
+  [
+   "我相信啊 這禮拜",
+   "I'm sure"
+  ],
+  [
+   "一定會有很多人來參加聚會",
+   "lots of people will come to the service this week."
+  ]
+ ],
+ "當然還要謝謝有這麼多弟兄姊妹的幫忙": [
+  [
+   "當然還要謝謝",
+   "And of course, we have to thank"
+  ],
+  [
+   "有這麼多弟兄姊妹的幫忙",
+   "all the brothers and sisters who have helped."
+  ]
+ ],
+ "今天你們兩個就跟著羅伯伯一起去做招待": [
+  [
+   "今天你們兩個就跟著羅伯伯",
+   "You two will help Uncle Luo"
+  ],
+  [
+   "一起去做招待",
+   "with the ushering today"
+  ]
+ ],
+ "瓊靜今天唱詩歌的大字報": [
+  [
+   "瓊靜",
+   "Qiongjing,"
+  ],
+  [
+   "今天唱詩歌的大字報",
+   "this is the lyric poster for today's songs."
+  ]
+ ],
+ "王伯伯都是在外面抽完煙才會進來的": [
+  [
+   "王伯伯都是",
+   "Uncle Wang always"
+  ],
+  [
+   "在外面抽完煙才會進來的",
+   "finishes his cigarette outside before coming in."
+  ]
+ ],
+ "今天唱駱駝 我剛才也是抽駱駝（駱駝牌香菸）": [
+  [
+   "今天唱駱駝",
+   "Today we'll sing “Camel.”"
+  ],
+  [
+   "我剛才也是抽駱駝（駱駝牌香菸）",
+   "I just smoked a Camel, too. (Camel cigarettes)"
+  ]
+ ],
+ "你們三個月就要關門了 不如早點關好了": [
+  [
+   "你們三個月就要關門了",
+   "You'll close in three months."
+  ],
+  [
+   "不如早點關好了",
+   "Might as well close now."
+  ]
+ ],
+ "嘿弟兄 你記得上次和你分享的四律嗎": [
+  [
+   "嘿弟兄 你記得",
+   "Brother, remember"
+  ],
+  [
+   "上次和你分享的四律嗎",
+   "the Four Spiritual Laws I shared with you?"
+  ]
+ ],
+ "是羅伯伯幫我們向差會借一千塊美金": [
+  [
+   "是羅伯伯幫我們",
+   "Uncle Luo helped us"
+  ],
+  [
+   "向差會借一千塊美金",
+   "borrow 1,000 US dollars from the mission board."
+  ]
+ ],
+ "張牧師 孩子要教 亂七八糟": [
+  [
+   "張牧師 孩子要教",
+   "Pastor Zhang, teach your child some manners!"
+  ],
+  [
+   "亂七八糟",
+   "What a mess!"
+  ]
+ ],
+ "茂松 怎麼啦 光晨怎麼在大哭啊": [
+  [
+   "茂松 怎麼啦",
+   "Maosong, what's wrong?"
+  ],
+  [
+   "光晨怎麼在大哭啊",
+   "Why is Guangchen crying so hard?"
+  ]
+ ],
+ "你當剛強壯膽 不要懼怕 也不要驚惶": [
+  [
+   "你當剛強壯膽",
+   "Be strong and courageous."
+  ],
+  [
+   "不要懼怕 也不要驚惶",
+   "Do not be afraid or discouraged."
+  ]
+ ],
+ "可是我在神學院 都沒有教如何為病人禱告呀": [
+  [
+   "可是我在神學院 都沒有教",
+   "But the School of Theology never taught me"
+  ],
+  [
+   "如何為病人禱告呀",
+   "how to pray for the sick."
+  ]
+ ],
+ "主祢不是說 手按病人 病人就好了": [
+  [
+   "主祢不是說",
+   "Lord, didn't You say"
+  ],
+  [
+   "手按病人 病人就好了",
+   "the sick would recover when we laid hands on them?"
+  ]
+ ],
+ "師母 這個掛號好像是從韓國來的": [
+  [
+   "師母",
+   "Pastor's wife,"
+  ],
+  [
+   "這個掛號好像是從韓國來的",
+   "this letter seems to be from Korea."
+  ]
+ ],
+ "誠摯的邀請您參與本屆的訪韓聖會": [
+  [
+   "誠摯的邀請您",
+   "We warmly invite you"
+  ],
+  [
+   "參與本屆的訪韓聖會",
+   "to this year's Korea revival conference."
+  ]
+ ],
+ "對 我要去做那個神學院沒有教的事": [
+  [
+   "對 我要去做",
+   "Yes. I'm going to learn"
+  ],
+  [
+   "那個神學院沒有教的事",
+   "what School of Theology never taught me."
+  ]
+ ],
+ "牧師牧師 有一個會友出車禍了": [
+  [
+   "牧師牧師",
+   "Pastor, Pastor,"
+  ],
+  [
+   "有一個會友出車禍了",
+   "a church member met with a car accident."
+  ]
+ ],
+ "非的把教會搞得跟湯母熊一樣": [
+  [
+   "非的把教會搞得",
+   "He has to turn the church"
+  ],
+  [
+   "跟湯母熊一樣",
+   "into Tom's World arcade!"
+  ]
+ ],
+ "我覺得很棒 謝謝你們支持光偉": [
+  [
+   "我覺得很棒",
+   "I think it's great."
+  ],
+  [
+   "謝謝你們支持光偉",
+   "Thank you for supporting Wayne."
+  ]
+ ],
+ "哎呀 說到這個煙 （舞台煙）": [
+  [
+   "哎呀",
+   "Oh,"
+  ],
+  [
+   "說到這個煙 （舞台煙）",
+   "don't get me started on the smoke. (Stage smoke)"
+  ]
+ ],
+ "要更用力做年輕人的事工": [
+  [
+   "要更用力",
+   "needs to put more effort"
+  ],
+  [
+   "做年輕人的事工",
+   "into the ministry for young people."
+  ]
+ ],
+ "可是爸 有些事情你可能會不太習慣": [
+  [
+   "可是爸",
+   "But Dad,"
+  ],
+  [
+   "有些事情你可能會不太習慣",
+   "there may be some things you’re not used to."
+  ]
+ ],
+ "吼 光偉哥 我們才剛放學": [
+  [
+   "吼 光偉哥",
+   "Oh, Come on, Brother Wayne."
+  ],
+  [
+   "我們才剛放學",
+   "We just got out of school."
+  ]
+ ],
+ "是啊 我們要一起去發歐趴糖啊 (All Pass)": [
+  [
+   "是啊 我們要一起去發",
+   "Yes. We're going to pass out"
+  ],
+  [
+   "歐趴糖啊 (All Pass)",
+   "good-luck candy for exams. (All Pass)"
+  ]
+ ],
+ "茂松 你記得新店行道會十週年的時候": [
+  [
+   "茂松 你記得",
+   "Maosong, do you remember"
+  ],
+  [
+   "新店行道會十週年的時候",
+   "when Xindian Covenant Church"
+  ]
+ ],
+ "你跟我的對話嗎": [
+  [
+   "你跟我的對話嗎",
+   "celebrated its 10th anniversary,"
+  ],
+  [
+   "",
+   "and the conversation you and I had?"
+  ]
+ ],
+ "我跟你要全華人歸向主啊": [
+  [
+   "我跟你要",
+   "I asked You"
+  ],
+  [
+   "全華人歸向主啊",
+   "to bring all Chinese people to the Lord."
+  ]
+ ],
+ "張牧師 我們已經來台灣參加烈火特會十五年了": [
+  [
+   "張牧師 我們已經來台灣",
+   "Pastor Zhang, we've been coming to Taiwan"
+  ],
+  [
+   "參加烈火特會十五年了",
+   "for the Fire Conference for fifteen years."
+  ]
+ ],
+ "但今天不是掛號 是一個包裹": [
+  [
+   "但今天不是掛號",
+   "But today, it’s not registered mail."
+  ],
+  [
+   "是一個包裹",
+   "It’s a package."
+  ]
+ ]
 }
