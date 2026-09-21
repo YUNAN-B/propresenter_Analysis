@@ -7,7 +7,8 @@ script_docx_to_pro6.py · 舞台劇台詞 docx → .pro6
   • 中文一張：enabled="false"（停用，操作時自動跳過、僅供對照），
     樣式＝styles.json「大字中英」的中文層（SourceHanSerifTC-Heavy 110pt 白），
     滿版置中。
-  • 英文一張：樣式＝styles.json「單句英文」（Optima-Bold 65pt），滿版置中。
+  • 英文一張：樣式＝styles.json「單句英文」（Optima-Bold 65pt），
+    沿用樣式原始位置──底部字幕條（y=971、垂直置底）。
 歌曲標記 → 一張「空白投影片」，以 label 標示（例：＊＊歌曲＊＊），不用 group
 （全檔單一無名 group）——操作者看清單就知道這裡要切歌，觸發時畫面清空。
 
@@ -78,18 +79,20 @@ def parse_script(paras):
     flush()
     return title, items, warnings
 
-# ── 樣式模板 → 置中滿版元素 ─────────────────────────────────────
+# ── 樣式模板 → 元素（中文置中滿版、英文照樣式置底）─────────────────────────────────────
 _STYLES = json.load(open(os.path.join(_HERE, "styles.json"), encoding="utf-8"))
 _CN_TMPL = _STYLES["大字中英"][0]      # 中文層：SourceHanSerifTC-Heavy 110pt 白
 _EN_TMPL = _STYLES["單句英文"][0]      # 英文：Optima-Bold 65pt
 
-def _styled_element(tmpl_xml: str, text: str) -> str:
-    """樣式模板 → 注入文字、滿版置中（{0 0 0 1920 1080}＋垂直置中）。"""
+def _styled_element(tmpl_xml: str, text: str, center: bool) -> str:
+    """樣式模板 → 注入文字。center=True 改為滿版垂直置中（中文用）；
+    False 保留模板原始位置與對齊（英文用──單句英文樣式本來就是置底字幕條）。"""
     el = ET.fromstring(tmpl_xml)
     el.set("UUID", str(uuid.uuid4()).upper())
-    el.set("verticalAlignment", "1")
-    pn = el.find('RVRect3D[@rvXMLIvarName="position"]')
-    if pn is not None: pn.text = "{0 0 0 1920 1080}"
+    if center:
+        el.set("verticalAlignment", "1")
+        pn = el.find('RVRect3D[@rvXMLIvarName="position"]')
+        if pn is not None: pn.text = "{0 0 0 1920 1080}"
     app._set_el_text(el, text)          # 以模板首字樣式寫入（保留字體/字級/顏色）
     return ET.tostring(el, encoding="unicode")
 
@@ -110,9 +113,9 @@ def build_pro6(title, items):
             continue
         _, cn, en = it
         if cn:                                             # 中文張：停用、僅供對照
-            slides.append(_slide(_styled_element(_CN_TMPL, cn), enabled=False))
+            slides.append(_slide(_styled_element(_CN_TMPL, cn, center=True), enabled=False))
         if en:                                             # 英文張：實際投影
-            slides.append(_slide(_styled_element(_EN_TMPL, en), enabled=True))
+            slides.append(_slide(_styled_element(_EN_TMPL, en, center=False), enabled=True))
     xml = app._doc_wrapper_groups([("", "0 0 0 0", slides)])
     xml = app._set_title(xml, title)
     xml, _ = app._dedup_uuids(xml)
