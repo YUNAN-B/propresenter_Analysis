@@ -122,9 +122,31 @@ def build_pro6(title, items):
     ET.fromstring(xml.decode("utf-8"))                     # 最終驗證
     return xml
 
+def _load_splits():
+    """splits.json（可選）：{原始中文句: [[中1,英1],[中2,英2]…]}——長句切分表。
+    只切不改字（由核對腳本保證）；英文空字串＝該半句不出英文張。"""
+    p = os.path.join(_HERE, "splits.json")
+    if not os.path.exists(p): return {}
+    d = json.load(open(p, encoding="utf-8"))
+    return {k: v for k, v in d.items() if not k.startswith("_")}
+
+def _apply_splits(items, table):
+    out = []
+    n = 0
+    for it in items:
+        if it[0] == "pair" and it[1] in table:
+            for cn, en in table[it[1]]:
+                out.append(("pair", cn, en))
+            n += 1
+        else:
+            out.append(it)
+    return out, n
+
 def main(path):
     paras = docx_paragraphs(path)
     title, items, warnings = parse_script(paras)
+    items, n_split = _apply_splits(items, _load_splits())
+    if n_split: print(f"   已套用長句切分：{n_split} 句 → 各拆兩張")
     title = title or os.path.basename(path).rsplit(".", 1)[0]
     xml = build_pro6(title, items)
     out = os.path.join(os.path.dirname(os.path.abspath(path)) or ".", f"{title}_台詞.pro6")
