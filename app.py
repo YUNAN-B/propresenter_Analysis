@@ -5,7 +5,7 @@ ProParse · 投影片解析 · Streamlit App
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
 .pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
-分頁通用；大標題右側另有五顆轉檔按鈕（7to6/6totxt/7totxt/67totxt/ziptozip，
+分頁通用；大標題右側另有三顆轉檔按鈕（7→6 / 67→txt / zip→zip，
 滑過看說明、按下展開選檔）：批次轉 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，
 沿用 pro2txt.py），打包 zip 下載。
 
@@ -1933,8 +1933,8 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 按錯了想反悔／反悔了又後悔 | 左側欄 ⟲（還原）⟳（重做） |
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
-| 把 Pro7 的 .pro 變成 .pro6 | 標題右側 **7to6** 按鈕（可多檔/整包 zip、打包下載），或直接上傳 .pro |
-| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | 標題右側 **6totxt / 7totxt / 67totxt** 按鈕；整包 zip 用 **ziptozip** |
+| 把 Pro7 的 .pro 變成 .pro6 | 標題右側 **7→6** 按鈕（可多檔/整包 zip、打包下載），或直接上傳 .pro |
+| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | 標題右側 **67→txt** 按鈕；整包 zip 用 **zip→zip** |
 | 一次把 N 行文字填進 N 張投影片 | **模板** → 最下方「大量填入文字」 |
 | 改檔案標題、看尺寸 | 左側欄最上面 |
 
@@ -1970,15 +1970,15 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 按文字框旁的「＋」開右欄＝雙語模式：左右逐行配對，一張投影片上排左欄、下排右欄。
 
 ### 轉檔（標題右側的小按鈕）
-大標題右邊有五顆轉檔按鈕，**滑鼠移到按鈕上會浮出該模式的詳細說明**；
+大標題右邊有三顆轉檔按鈕，**滑鼠移到按鈕上會浮出該模式的詳細說明**；
 按下去才會展開選檔欄位（再按一次或按 ✕ 收合）：
 
-- **7to6**：Pro7 的 .pro（可整包 zip）→ .pro6。逐檔顯示結果，可單獨下載、
+- **7→6**：Pro7 的 .pro（可整包 zip）→ .pro6。逐檔顯示結果，可單獨下載、
   多檔打包 zip、或按「載入編輯」直接開始改；可順便套樣式、繁簡轉換、替換媒體路徑前綴。
   保留歌詞樣式/段落/標籤/熱鍵/備註/CCLI；不帶媒體庫連結的背景、特效、編曲順序。
-- **6totxt / 7totxt / 67totxt**：.pro6、.pro 或兩者混合 → 抽歌詞轉同名 .txt
+- **67→txt**：.pro6 與 .pro（可混合）→ 抽歌詞轉同名 .txt
   （[段落名] 標頭＋每張歌詞、張與張之間空一行），多檔打包 zip 下載。
-- **ziptozip**：整包 zip 進、整包 zip 出——zip 內所有 .pro6/.pro 全轉 .txt，
+- **zip→zip**：整包 zip 進、整包 zip 出——zip 內所有 .pro6/.pro 全轉 .txt，
   子資料夾結構原樣保留。
 
 ---
@@ -2522,39 +2522,34 @@ def _convert_txt_body(files):
                            "converted_txt.zip", "application/zip",
                            key="p2tzip", use_container_width=True, type="primary")
 
-# 標題右側的轉檔按鈕列：key → (uploader 接受副檔名, 輸出是否 txt, 滑過按鈕的詳細說明)
+# 標題右側的轉檔按鈕列：key → (按鈕顯示文字, uploader 接受副檔名, 輸出是否 txt, 滑過的詳細說明)
 _TC_MODES={
-    "7to6": (["pro","zip"], False,
-        "Pro7 → Pro6\n\n把 ProPresenter 7 的 .pro（protobuf）轉成 Pro6 能直接開的 .pro6"
-        "（XML）。可多檔或整包 zip。\n\n轉換邏輯：文字圖層 RTF 原封搬運（字體/字級/顏色/"
-        "位置/對齊全保留）；段落群組、標籤、熱鍵、備註、CCLI 一併帶過；檔內帶路徑的背景"
-        "媒體轉成路徑引用。不轉：從媒體庫連結（檔內無路徑）的背景、特效、編曲順序。\n\n"
-        "可加後處理（套樣式、繁簡轉換、媒體路徑前綴替換）；多檔自動打包 zip，"
-        "也可按「載入編輯」直接開始改。"),
-    "6totxt": (["pro6"], True,
-        "Pro6 → 純文字\n\n上傳一個或多個 .pro6，逐檔抽出歌詞轉成同名 .txt。\n\n"
-        "轉換邏輯：解析 XML 內各群組/投影片的文字圖層 RTF，輸出「[段落名] 標頭＋每張歌詞、"
-        "張與張之間空一行」；同張多圖層以換行相接。多檔打包 zip 下載。"),
-    "7totxt": (["pro"], True,
-        "Pro7 → 純文字\n\n上傳一個或多個 ProPresenter 7 的 .pro，逐檔抽出歌詞轉成同名 "
-        ".txt。\n\n轉換邏輯：解碼 protobuf、依 cue_groups 重建顯示順序（與 ProPresenter "
-        "一致），輸出「[段落名] 標頭＋每張歌詞、張與張之間空一行」。多檔打包 zip 下載。"),
-    "67totxt": (["pro6","pro"], True,
-        "Pro6＋Pro7 混合 → 純文字\n\n.pro6 與 .pro 一起上傳，自動辨識格式（XML 或 "
-        "protobuf），全部抽出歌詞轉成同名 .txt，多檔打包 zip 下載。\n\n輸出格式同 "
-        "6totxt / 7totxt：[段落名] 標頭＋每張歌詞、張與張之間空一行。"),
-    "ziptozip": (["zip"], True,
-        "整包 zip → 整包 zip\n\n上傳 zip（含子資料夾也可以），把裡面所有 .pro6 / .pro "
-        "全部抽出歌詞轉成 .txt，打包成一個 zip 下載。\n\n子資料夾結構原樣保留、同名自動"
-        "去重；中文檔名（舊 zip 無 UTF-8 標記）自動以 cp950 修復；壞檔只報錯、不中斷批次。"),
+    "7to6": ("7→6", ["pro","zip"], False,
+        "Pro7 → Pro6\n\n把 ProPresenter 7 的 .pro 檔轉成 ProPresenter 6 能直接開的 "
+        ".pro6 檔。可一次多檔，或整包 zip。\n\n會原樣保留：歌詞文字和它的字體、字級、"
+        "顏色、位置、對齊，以及段落分組（主歌/副歌…）、投影片標籤、熱鍵、備註、"
+        "CCLI 版權資訊；檔案裡帶路徑的背景影片/圖片會改成用路徑連結。\n\n"
+        "不會帶過來：從媒體庫連結（檔案裡沒有路徑）的背景、特效、編曲順序。\n\n"
+        "轉完可順便套版面樣式、做繁簡轉換、替換媒體路徑開頭；多檔會自動打包成 zip，"
+        "也可以按「載入編輯」直接開始改。"),
+    "67totxt": ("67→txt", ["pro6","pro"], True,
+        "Pro6＋Pro7 → 純文字\n\n上傳 .pro6 或 .pro（兩種混在一起也可以），自動辨識"
+        "版本，逐檔抽出歌詞存成同名 .txt。\n\n輸出長相：[段落名] 一行標頭，接著每張"
+        "投影片的歌詞，張與張之間空一行；同一張有多個文字框就以換行相接。"
+        "多檔會自動打包成 zip 下載。"),
+    "ziptozip": ("zip→zip", ["zip"], True,
+        "整包 zip → 整包 zip\n\n上傳 zip（裡面有子資料夾也可以），把其中所有 "
+        ".pro6 / .pro 全部抽出歌詞轉成 .txt，打包成一個 zip 下載。\n\n"
+        "子資料夾結構原樣保留、同名檔自動改名避免蓋掉；舊 zip 的中文檔名會自動修復"
+        "亂碼；壞檔只會報錯，不會中斷整批。"),
 }
 
 def _transcode_panel(mode):
     """按下標題右側轉檔按鈕後展開的面板：選檔 → 批次轉換 → 打包下載。"""
-    types,to_txt,tip=_TC_MODES[mode]
+    lbl,types,to_txt,tip=_TC_MODES[mode]
     with st.container(border=True):
         _h1,_h2=st.columns([8,1], vertical_alignment="center")
-        _h1.markdown(f"**轉檔 · {mode}**（{' / '.join('.'+t for t in types)} → "
+        _h1.markdown(f"**轉檔 · {lbl}**（{' / '.join('.'+t for t in types)} → "
                      f"{'.txt' if to_txt else '.pro6'}）", help=tip)
         if _h2.button("✕", key="tc_close", help="關閉轉檔面板", use_container_width=True):
             st.session_state.pop("tc_mode",None); st.rerun()
@@ -2576,10 +2571,10 @@ if "_pending_new" in st.session_state:
 st.markdown("<style>[class*='st-key-tcbtn_'] button,[class*='st-key-tc_close'] button{"
             "min-height:1.7rem;height:1.7rem;padding:0 .55rem;font-size:.78rem;"
             "border-radius:6px;}</style>", unsafe_allow_html=True)
-_trow=st.columns([3.4,.9,1,1,1.05,1.05], vertical_alignment="center")
+_trow=st.columns([4.5,.8,1,1.05], vertical_alignment="center")
 _trow[0].title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
-for _c,(_m,(_ty,_tt,_tip)) in zip(_trow[1:], _TC_MODES.items()):
-    if _c.button(_m, key=f"tcbtn_{_m}", help=_tip, use_container_width=True,
+for _c,(_m,(_lbl,_ty,_tt,_tip)) in zip(_trow[1:], _TC_MODES.items()):
+    if _c.button(_lbl, key=f"tcbtn_{_m}", help=_tip, use_container_width=True,
                  type="primary" if st.session_state.get("tc_mode")==_m else "secondary"):
         if st.session_state.get("tc_mode")==_m: st.session_state.pop("tc_mode",None)
         else: st.session_state["tc_mode"]=_m
