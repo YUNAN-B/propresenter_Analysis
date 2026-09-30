@@ -1979,7 +1979,8 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 - **67→txt**：.pro6 與 .pro（可混合）→ 抽歌詞轉同名 .txt
   （[段落名] 標頭＋每張歌詞、張與張之間空一行），多檔打包 zip 下載。
 - **zip→zip**：整包 zip 進、整包 zip 出——zip 內所有 .pro6/.pro 全轉 .txt，
-  子資料夾結構原樣保留。
+  子資料夾結構原樣保留。結果是一份固定高度的清單（一行一檔），
+  檔案再多也不撐開版面，往清單裡捲動就看得到全部。
 
 ---
 
@@ -2486,17 +2487,20 @@ def _convert_pro6_body(files):
                            "converted_pro6.zip", "application/zip",
                            key="convzip", use_container_width=True, type="primary")
 
-def _convert_txt_body(files, kp="p2t"):
+def _convert_txt_body(files, kp="p2t", compact=False):
     """轉檔 → txt：批次抽出歌詞轉成純文字（重用 pro2txt.py），打包 zip 下載。
-    kp＝widget key 前綴（多個入口同時渲染時避免 key 相撞）。"""
-    ok=[]; seen={}                               # ok: (zip內路徑, txt字串)
+    kp＝widget key 前綴（多個入口同時渲染時避免 key 相撞）。
+    compact＝True（zip→zip 用）：不逐檔展開卡片，改成「固定高度、可捲動」的
+    一行一檔清單——檔案再多也不撐開版面，往下捲就看得到其餘的；只給整包下載。"""
+    ok=[]; seen={}; rows=[]                      # ok: (zip內路徑, txt字串)
     for idx,(stem,fname,raw) in enumerate(files):
         try:
             groups=(pro2txt.pro7_groups(raw) if pro2txt.is_pro7(raw, fname)
                     else pro2txt.pro6_groups(raw))
             text=pro2txt.groups_to_text(groups)
         except Exception as e:
-            st.error(f"❌ **{fname}**：{e}")
+            if compact: rows.append(f"❌ {_html_esc(fname)}：{_html_esc(str(e))}")
+            else: st.error(f"❌ **{fname}**：{e}")
             continue
         out_path=stem+".txt"                     # 同名去重（不同資料夾已由相對路徑區隔）
         if out_path in seen:
@@ -2505,6 +2509,10 @@ def _convert_txt_body(files, kp="p2t"):
             seen[out_path]=0
         ok.append((out_path, text))
         _ns=sum(len(s) for _,s in groups)
+        if compact:
+            rows.append(f"✅ {_html_esc(out_path)}　<span style='color:#888'>"
+                        f"{len(groups)} 段 / {_ns} 張 / {len(text)} 字元</span>")
+            continue
         with st.container(border=True):
             c1,c2=st.columns([4,1.2], vertical_alignment="center")
             c1.markdown(f"✅ **{out_path}**　<span style='font-size:.8rem;color:#888'>"
@@ -2514,6 +2522,13 @@ def _convert_txt_body(files, kp="p2t"):
                                key=f"{kp}dl_{idx}", use_container_width=True)
             with st.expander("預覽"):
                 st.text(text)
+    if compact and rows:
+        _nf=len(files)-len(ok)
+        st.caption(f"共 {len(files)} 個檔案，成功 {len(ok)} 個"
+                   +(f"、失敗 {_nf} 個" if _nf else "")+"（清單可捲動）：")
+        with st.container(height=300, border=True):
+            st.markdown("<div style='font-size:.85rem;line-height:2'>"
+                        +"<br>".join(rows)+"</div>", unsafe_allow_html=True)
     if ok:
         zbuf=io.BytesIO()
         with zipfile.ZipFile(zbuf,"w",zipfile.ZIP_DEFLATED) as zf:
@@ -2542,7 +2557,8 @@ _TC_MODES={
         "整包 zip → 整包 zip\n\n上傳 zip（裡面有子資料夾也可以），把其中所有 "
         ".pro6 / .pro 全部抽出歌詞轉成 .txt，打包成一個 zip 下載。\n\n"
         "子資料夾結構原樣保留、同名檔自動改名避免蓋掉；舊 zip 的中文檔名會自動修復"
-        "亂碼；壞檔只會報錯，不會中斷整批。"),
+        "亂碼；壞檔只會報錯，不會中斷整批。\n\n結果以固定高度的清單顯示，"
+        "檔案再多也不撐開版面，往清單裡捲動即可看完。"),
 }
 
 def _transcode_tab():
@@ -2568,7 +2584,8 @@ def _transcode_tab():
             files=_collect_convert_sources(ups)
             if not files:
                 st.warning("上傳內容裡沒有 .pro6 / .pro 檔。"); continue
-            if to_txt: _convert_txt_body(files, kp=f"tc{mode}")
+            if to_txt: _convert_txt_body(files, kp=f"tc{mode}",
+                                         compact=(mode=="ziptozip"))
             else:      _convert_pro6_body(files)
 
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
