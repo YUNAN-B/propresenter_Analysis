@@ -38,6 +38,8 @@ def _load_app():
         def __getattr__(self, k): return _noop
     st.columns = lambda spec, *a, **k: [_Ctx() for _ in range(spec if isinstance(spec, int) else len(spec))]
     st.tabs = lambda labels, *a, **k: [_Ctx() for _ in labels]
+    st.container = lambda *a, **k: _Ctx()
+    st.expander = lambda *a, **k: _Ctx()
     st.stop = lambda: (_ for _ in ()).throw(_Stop())
 
     class _SS(dict):
