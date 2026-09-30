@@ -2588,6 +2588,41 @@ def _transcode_tab():
                                          compact=(mode=="ziptozip"))
             else:      _convert_pro6_body(files)
 
+    # 🥚 彩蛋：67→txt 的 ？ 說明泡泡持續停留 5 秒後，最後一排多出 67676…。
+    # 認泡泡靠說明文字的首行（只有 67→txt 有）；移開游標泡泡關閉即取消計時。
+    # 旗標掛父視窗：rerun 重建 iframe 也只掛一次 observer。
+    components.html("""<script>
+    (function(){
+      const P=window.parent;
+      if(P.__pp_67egg__)return; P.__pp_67egg__=true;
+      const doc=P.document;
+      let timer=null, cur=null;
+      const check=()=>{
+        let hit=null;
+        doc.querySelectorAll('[data-testid="stTooltipContent"],[role="tooltip"]')
+           .forEach(t=>{ if(t.textContent.indexOf('Pro6＋Pro7 → 純文字')>=0) hit=t; });
+        if(hit){
+          if(cur!==hit){
+            cur=hit;
+            if(timer)clearTimeout(timer);
+            timer=setTimeout(()=>{
+              if(doc.contains(hit)&&!hit.querySelector('.pp-67egg')){
+                const d=doc.createElement('div');
+                d.className='pp-67egg';
+                d.textContent='6767676767676767';
+                hit.appendChild(d);
+              }
+            },5000);
+          }
+        }else{
+          cur=null;
+          if(timer){clearTimeout(timer); timer=null;}
+        }
+      };
+      new P.MutationObserver(check).observe(doc.body,{childList:true,subtree:true});
+    })();
+    </script>""", height=0)
+
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:
     _raw,_name=st.session_state.pop("_pending_new")
