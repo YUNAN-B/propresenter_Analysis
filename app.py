@@ -1974,7 +1974,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 按下去才會展開選檔欄位（再按一次或按 ✕ 收合）：
 
 - **7→6**：Pro7 的 .pro（可整包 zip）→ .pro6。逐檔顯示結果，可單獨下載、
-  多檔打包 zip、或按「載入編輯」直接開始改；可順便套樣式、繁簡轉換、替換媒體路徑前綴。
+  多檔打包 zip、或按「載入編輯」直接開始改；可順便套樣式、繁簡轉換。
   保留歌詞樣式/段落/標籤/熱鍵/備註/CCLI；不帶媒體庫連結的背景、特效、編曲順序。
 - **67→txt**：.pro6 與 .pro（可混合）→ 抽歌詞轉同名 .txt
   （[段落名] 標頭＋每張歌詞、張與張之間空一行），多檔打包 zip 下載。
@@ -2439,18 +2439,11 @@ def _convert_pro6_body(files):
     _sty="不套用"
     if _STYLES:
         _sty=_oc2.selectbox("轉換後套用樣式", ["不套用"]+list(_STYLES.keys()), key="conv_style")
-    with st.expander("進階：媒體路徑前綴替換（把原機路徑換成目標機路徑）"):
-        st.caption("只影響檔內帶路徑的背景/媒體元素。例：原 `/Users/newmediamac/Documents`"
-                   "、新 `/Users/mac/Documents`。留空＝不替換。")
-        _po=st.text_input("原路徑前綴", key="conv_path_old")
-        _pn=st.text_input("新路徑前綴", key="conv_path_new")
-    _path_map=(_po.strip(), _pn.strip()) if _po.strip() else None
-
     ok=[]                                        # (相對路徑stem, pro6 bytes)
     for idx,(stem,fname,raw) in enumerate(pros):
         base=stem.rsplit("/",1)[-1]              # 個別下載/載入編輯用檔名（去掉 zip 內路徑）
         try:
-            nb,rep=pro7.pro7_to_pro6(raw, path_map=_path_map)
+            nb,rep=pro7.pro7_to_pro6(raw)
             post=[]
             if _sty!="不套用":
                 nb,_sn=_apply_style(nb,_sty); post.append(f"樣式×{_sn}")
@@ -2522,22 +2515,23 @@ def _convert_txt_body(files):
                            "converted_txt.zip", "application/zip",
                            key="p2tzip", use_container_width=True, type="primary")
 
-# 標題右側的轉檔按鈕列：key → (按鈕顯示文字, uploader 接受副檔名, 輸出是否 txt, 滑過的詳細說明)
+# 標題右側的轉檔按鈕列：key → (按鈕顯示文字, uploader 接受副檔名, 輸出是否 txt,
+# 識別色（按鈕＝面板同色，一眼對得上）, 滑過的詳細說明)
 _TC_MODES={
-    "7to6": ("7→6", ["pro","zip"], False,
+    "7to6": ("7→6", ["pro","zip"], False, "#3b82f6",
         "Pro7 → Pro6\n\n把 ProPresenter 7 的 .pro 檔轉成 ProPresenter 6 能直接開的 "
         ".pro6 檔。可一次多檔，或整包 zip。\n\n會原樣保留：歌詞文字和它的字體、字級、"
         "顏色、位置、對齊，以及段落分組（主歌/副歌…）、投影片標籤、熱鍵、備註、"
         "CCLI 版權資訊；檔案裡帶路徑的背景影片/圖片會改成用路徑連結。\n\n"
         "不會帶過來：從媒體庫連結（檔案裡沒有路徑）的背景、特效、編曲順序。\n\n"
-        "轉完可順便套版面樣式、做繁簡轉換、替換媒體路徑開頭；多檔會自動打包成 zip，"
+        "轉完可順便套版面樣式、做繁簡轉換；多檔會自動打包成 zip，"
         "也可以按「載入編輯」直接開始改。"),
-    "67totxt": ("67→txt", ["pro6","pro"], True,
+    "67totxt": ("67→txt", ["pro6","pro"], True, "#10b981",
         "Pro6＋Pro7 → 純文字\n\n上傳 .pro6 或 .pro（兩種混在一起也可以），自動辨識"
         "版本，逐檔抽出歌詞存成同名 .txt。\n\n輸出長相：[段落名] 一行標頭，接著每張"
         "投影片的歌詞，張與張之間空一行；同一張有多個文字框就以換行相接。"
         "多檔會自動打包成 zip 下載。"),
-    "ziptozip": ("zip→zip", ["zip"], True,
+    "ziptozip": ("zip→zip", ["zip"], True, "#f59e0b",
         "整包 zip → 整包 zip\n\n上傳 zip（裡面有子資料夾也可以），把其中所有 "
         ".pro6 / .pro 全部抽出歌詞轉成 .txt，打包成一個 zip 下載。\n\n"
         "子資料夾結構原樣保留、同名檔自動改名避免蓋掉；舊 zip 的中文檔名會自動修復"
@@ -2545,12 +2539,22 @@ _TC_MODES={
 }
 
 def _transcode_panel(mode):
-    """按下標題右側轉檔按鈕後展開的面板：選檔 → 批次轉換 → 打包下載。"""
-    lbl,types,to_txt,tip=_TC_MODES[mode]
-    with st.container(border=True):
+    """按下標題右側轉檔按鈕後展開的面板：選檔 → 批次轉換 → 打包下載。
+    面板底色/邊框用該模式的識別色（同按鈕），一眼看出目前在哪個轉檔模式。"""
+    lbl,types,to_txt,color,tip=_TC_MODES[mode]
+    # 邊框在 stVerticalBlockBorderWrapper（key class 的外層）上，須用 :has 選到；
+    # 背景另掛在 key 元素本身當 fallback（舊瀏覽器不支援 :has 時仍有底色）。
+    st.markdown(f"<style>"
+                f"[data-testid='stVerticalBlockBorderWrapper']:has([class*='st-key-tc_panel'])"
+                f"{{background:{color}12;border:1.5px solid {color}66;border-radius:10px;}}"
+                f"[class*='st-key-tc_panel']{{background:transparent;}}"
+                f"</style>", unsafe_allow_html=True)
+    with st.container(border=True, key="tc_panel"):
         _h1,_h2=st.columns([8,1], vertical_alignment="center")
-        _h1.markdown(f"**轉檔 · {lbl}**（{' / '.join('.'+t for t in types)} → "
-                     f"{'.txt' if to_txt else '.pro6'}）", help=tip)
+        _h1.markdown(f"**<span style='color:{color}'>轉檔 · {lbl}</span>**"
+                     f"（{' / '.join('.'+t for t in types)} → "
+                     f"{'.txt' if to_txt else '.pro6'}）", help=tip,
+                     unsafe_allow_html=True)
         if _h2.button("✕", key="tc_close", help="關閉轉檔面板", use_container_width=True):
             st.session_state.pop("tc_mode",None); st.rerun()
         ups=st.file_uploader("選擇檔案（可多選）", type=types,
@@ -2570,10 +2574,18 @@ if "_pending_new" in st.session_state:
 # 按鈕滑鼠移過即顯示該模式的詳細說明（help tooltip）；再按一次同鈕＝收合。
 st.markdown("<style>[class*='st-key-tcbtn_'] button,[class*='st-key-tc_close'] button{"
             "min-height:1.7rem;height:1.7rem;padding:0 .55rem;font-size:.78rem;"
-            "border-radius:6px;}</style>", unsafe_allow_html=True)
+            "border-radius:6px;}"
+            # 每顆按鈕用該模式的識別色（未選＝色框色字、hover 淡底、選中＝實心填色）
+            +"".join(
+                f"[class*='st-key-tcbtn_{_m}'] button{{border:1px solid {_c}99;color:{_c};}}"
+                f"[class*='st-key-tcbtn_{_m}'] button:hover{{border-color:{_c};background:{_c}1a;}}"
+                f"[class*='st-key-tcbtn_{_m}'] button[kind='primary']{{background:{_c}!important;"
+                f"border-color:{_c}!important;color:#fff!important;}}"
+                for _m,(_l,_t,_x,_c,_p) in _TC_MODES.items())
+            +"</style>", unsafe_allow_html=True)
 _trow=st.columns([4.5,.8,1,1.05], vertical_alignment="center")
 _trow[0].title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
-for _c,(_m,(_lbl,_ty,_tt,_tip)) in zip(_trow[1:], _TC_MODES.items()):
+for _c,(_m,(_lbl,_ty,_tt,_col,_tip)) in zip(_trow[1:], _TC_MODES.items()):
     if _c.button(_lbl, key=f"tcbtn_{_m}", help=_tip, use_container_width=True,
                  type="primary" if st.session_state.get("tc_mode")==_m else "secondary"):
         if st.session_state.get("tc_mode")==_m: st.session_state.pop("tc_mode",None)
@@ -2619,6 +2631,11 @@ with st.sidebar:
         st.session_state["xml_content"]=_set_title(xml_bytes,_t.strip())
         st.session_state["history"].append("標題"); st.rerun()
     st.caption(f"尺寸　{doc_meta['w']} × {doc_meta['h']}")
+    # 全檔圖層數一行看完：每張投影片的文字圖層數依序串成一整行數字
+    _lc=[c for g in _summary_groups for c in g["layers"]]
+    if _lc:
+        _lsep="" if all(c<10 for c in _lc) else ","
+        st.caption(f"圖層　{_lsep.join(map(str,_lc))}")
     if st.session_state.get("_src_note"):
         st.caption("🔁 由 Pro7 轉換："+st.session_state["_src_note"])
     # 段落表格：段落｜張數｜圖層數（每張的文字圖層數由左而右串接，如 22222）
