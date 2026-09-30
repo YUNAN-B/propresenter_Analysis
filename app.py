@@ -2457,15 +2457,21 @@ def _convert_pro6_body(files):
             c1,c2,c3=st.columns([4,1.2,1.2], vertical_alignment="center")
             gsum="、".join(f"{n}×{c}" for n,c in rep["groups"][:8])
             if len(rep["groups"])>8: gsum+="…"
-            _media=""
-            if rep.get("n_bg") or rep.get("n_media_el"):
-                _media=f"　·　背景 {rep.get('n_bg',0)} / 媒體元素 {rep.get('n_media_el',0)}"
+            # 每張投影片的文字圖層數依序串成一行（同側欄「圖層」）
+            try:
+                _lc=[c for g in _doc_summary(nb)[1] for c in g["layers"]]
+            except Exception:
+                _lc=[]
+            _layers=""
+            if _lc:
+                _lsep="" if all(c<10 for c in _lc) else ","
+                _layers=f"　·　圖層 {_lsep.join(map(str,_lc))}"
             c1.markdown(f"✅ **{rep['title'] or base}**　"
                         f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
                         f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
                         +(f"（含 {rep.get('n_empty',0)} 空層）" if rep.get("n_empty") else "")
                         +(f"　·　略過 {rep['n_skipped']} 個元素" if rep["n_skipped"] else "")
-                        +_media+("　·　"+"、".join(post) if post else "")
+                        +_layers+("　·　"+"、".join(post) if post else "")
                         +f"<br>{gsum}</span>", unsafe_allow_html=True)
             c2.download_button("⬇ .pro6", nb, base+".pro6", "application/xml",
                                key=f"convdl_{idx}_{stem}", use_container_width=True)
