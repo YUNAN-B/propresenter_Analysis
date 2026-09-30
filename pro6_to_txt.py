@@ -79,6 +79,22 @@ parse_rtf = _app.parse_rtf
 _drop_style_break_nl = _app._drop_style_break_nl
 
 
+def _fix_surrogates(s: str) -> str:
+    """合併 UTF-16 代理對成完整字元（RTF \\uNNNN 對 >U+FFFF 的字用代理對，
+    parse_rtf 逐字塞入不合併）；孤立代理以 U+FFFD 取代，確保可寫成 utf-8。"""
+    if not any(0xD800 <= ord(c) <= 0xDFFF for c in s):
+        return s
+    out = []; i = 0
+    while i < len(s):
+        o = ord(s[i])
+        if 0xD800 <= o <= 0xDBFF and i + 1 < len(s) and 0xDC00 <= ord(s[i+1]) <= 0xDFFF:
+            out.append(chr(0x10000 + ((o - 0xD800) << 10) + (ord(s[i+1]) - 0xDC00)))
+            i += 2; continue
+        out.append("�" if 0xD800 <= o <= 0xDFFF else s[i])
+        i += 1
+    return "".join(out)
+
+
 def slide_text(slide_el) -> str:
     """一張 RVDisplaySlide → 明文（所有文字圖層，依圖層順序以換行相接）。"""
     parts = []
@@ -118,7 +134,7 @@ def pro6_to_text(xml_bytes: bytes) -> str:
             out.append(f"[{gname}]")
         out.append("\n\n".join(blocks))
         out.append("")                      # 群組之間空一行
-    return "\n".join(out).strip("\n") + "\n"
+    return _fix_surrogates("\n".join(out).strip("\n") + "\n")
 
 
 def convert_file(path: str) -> str:
@@ -157,12 +173,12 @@ def main(argv):
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         try:
             text = convert_file(path)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(text)
         except Exception as e:
             print(f"✗ {rel}: {e}")
             fail += 1
             continue
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(text)
         print(f"✓ {rel} → {os.path.relpath(out_path, dst)}")
         ok += 1
     print(f"\n完成：{ok} 個成功" + (f"，{fail} 個失敗" if fail else ""))

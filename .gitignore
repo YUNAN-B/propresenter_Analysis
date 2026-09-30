@@ -30,6 +30,12 @@ S__*.jpg
 # 教會實機資料備份（1.5GB 媒體，不入版控）
 /ProPresenter/
 
+# ProPresenter6 資料庫與其 txt 轉出（歌詞內容，不入版控）
+/Propresenter6 data base/
+/Propresenter6 data base_txt/
+/*.txt
+!/requirements.txt
+
 # Streamlit 本機暫存設定
 .streamlit/credentials.toml
 
