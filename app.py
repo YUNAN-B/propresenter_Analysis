@@ -6,7 +6,7 @@ ProParse · 投影片解析 · Streamlit App
 也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
 .pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
 分頁通用；「轉檔」分頁三種模式各一個上傳框（7→6 / 67→txt / zip→zip，
-標題滑過看說明）：批次轉 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，沿用
+「選擇檔案」旁的 ？ 滑過看說明）：批次轉 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，沿用
 pro2txt.py），打包 zip 下載。「創造」在最左＝未載檔時的預設畫面。
 
 ── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
@@ -1971,7 +1971,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 ### 轉檔（三種模式各一個上傳框）
 分頁裡三種模式各有一個上傳框（各配自己的顏色），不用先選模式——
-**檔案丟進哪個框就做哪種轉換**；標題旁的 ？ 滑鼠移上去有詳細說明：
+**檔案丟進哪個框就做哪種轉換**；「選擇檔案」旁的 ？ 滑鼠移上去有詳細說明：
 
 - **7→6**：Pro7 的 .pro（可整包 zip）→ .pro6。逐檔顯示結果，可單獨下載、
   多檔打包 zip、或按「載入編輯」直接開始改；可順便套樣式、繁簡轉換。
@@ -2563,7 +2563,7 @@ _TC_MODES={
 
 def _transcode_tab():
     """轉檔分頁：三種模式各一個常駐上傳框（標題＝模式名、配識別色），
-    不用先選模式——檔案丟進哪個框就做哪種轉換。標題旁 ？ 滑過看詳細說明。"""
+    不用先選模式——檔案丟進哪個框就做哪種轉換。「選擇檔案」旁的 ？ 滑過看詳細說明。"""
     # 邊框在 stVerticalBlockBorderWrapper（key class 的外層）上，須用 :has 選到；
     # 背景另掛在 key 元素本身當 fallback（舊瀏覽器不支援 :has 時仍有底色）。
     st.markdown("<style>"+"".join(
@@ -2576,9 +2576,9 @@ def _transcode_tab():
         with st.container(border=True, key=f"tc_panel_{mode}"):
             st.markdown(f"**<span style='color:{color};font-size:1.05rem'>{lbl}</span>**"
                         f"　（{' / '.join('.'+t for t in types)} → "
-                        f"{'.txt' if to_txt else '.pro6'}）", help=tip,
+                        f"{'.txt' if to_txt else '.pro6'}）",
                         unsafe_allow_html=True)
-            ups=st.file_uploader("選擇檔案（可多選）", type=types,
+            ups=st.file_uploader("選擇檔案（可多選）", type=types, help=tip,
                                  accept_multiple_files=True, key=f"tcup_{mode}")
             if not ups: continue
             files=_collect_convert_sources(ups)
