@@ -5,7 +5,8 @@ ProParse · 投影片解析 · Streamlit App
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
 .pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
-分頁通用；「轉換」分頁另提供批次 .pro → .pro6（多檔、zip 打包）。
+分頁通用；「轉換」分頁另提供批次 .pro → .pro6（多檔、zip 打包），以及
+批次 .pro6/.pro → 純文字 txt（可上傳整包 zip、打包 zip 下載，沿用 pro2txt.py）。
 
 ── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
   pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
@@ -107,6 +108,7 @@ except ModuleNotFoundError:           # tests 以檔案路徑載入 app.py 時�
     import sys as _sys
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import pro7
+import pro2txt                        # .pro6/.pro → 純文字 txt（同目錄，零依賴）
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1931,6 +1933,7 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
 | 把 Pro7 的 .pro 變成 .pro6 | **轉換** 分頁（可多檔、打包下載），或直接上傳 .pro |
+| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | **轉換** 分頁最下方「轉文字」（可上傳整包 zip、打包 zip 下載） |
 | 一次把 N 行文字填進 N 張投影片 | **模板** → 最下方「大量填入文字」 |
 | 改檔案標題、看尺寸 | 左側欄最上面 |
 
@@ -1971,6 +1974,10 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 **會保留**：歌詞（字體/字級/顏色/位置原樣）、段落分組、標籤、熱鍵、備註、CCLI；
 檔內帶路徑的背景媒體會轉成路徑引用（進階選項可把原機路徑前綴換成目標機的）。
 **不會帶過來**：從媒體庫連結（檔內沒有路徑）的背景、特效、編曲順序。
+
+同分頁最下方另有「**轉文字**」：上傳 .pro6 / .pro（或整包 zip，含子資料夾也可以），
+每檔抽出歌詞轉成同名 .txt（[段落名] 標頭＋每張歌詞），全部打包 zip 下載，
+zip 內的資料夾結構原樣保留。
 
 ---
 
@@ -2478,6 +2485,73 @@ def _convert_ui():
                            "converted_pro6.zip", "application/zip",
                            key="convzip", use_container_width=True, type="primary")
 
+def _collect_txt_sources(ups) -> list:
+    """上傳清單（.pro6/.pro/.zip）→ [(輸出相對路徑stem, 顯示檔名, bytes), ...]；
+    zip 取內部所有 .pro6/.pro（含子資料夾，輸出保留相對路徑）。"""
+    out=[]
+    for up in ups:
+        raw=up.getvalue()
+        if up.name.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    for info in zf.infolist():
+                        name=_zip_member_name(info).replace("\\","/")
+                        base=name.rsplit("/",1)[-1]
+                        if (info.is_dir() or "__MACOSX" in name or base.startswith(".")
+                                or not base.lower().endswith((".pro6",".pro"))):
+                            continue
+                        out.append((name.rsplit(".",1)[0], base, zf.read(info)))
+            except zipfile.BadZipFile:
+                st.error(f"❌ **{up.name}**：不是有效的 zip 檔")
+        else:
+            out.append((up.name.rsplit(".",1)[0], up.name, raw))
+    return out
+
+def _pro2txt_ui():
+    """轉文字：批次把 .pro6 / .pro 轉成純文字 txt（重用 pro2txt.py），打包 zip 下載。"""
+    st.caption("上傳 **.pro6** / **.pro**（或整包 **.zip**，含子資料夾也可以），每檔轉出一個"
+               "同名 **.txt**（[段落名] 標頭＋每張歌詞、張與張之間空一行），"
+               "全部打包成 zip 下載。zip 內的子資料夾結構會原樣保留。")
+    ups=st.file_uploader("上傳一個或多個 .pro6 / .pro / .zip", type=["pro6","pro","zip"],
+                         accept_multiple_files=True, key="p2t_up")
+    if not ups: return
+    files=_collect_txt_sources(ups)
+    if not files:
+        st.warning("上傳內容裡沒有 .pro6 / .pro 檔。"); return
+
+    ok=[]; seen={}                               # ok: (zip內路徑, txt字串)
+    for idx,(stem,fname,raw) in enumerate(files):
+        try:
+            groups=(pro2txt.pro7_groups(raw) if pro2txt.is_pro7(raw, fname)
+                    else pro2txt.pro6_groups(raw))
+            text=pro2txt.groups_to_text(groups)
+        except Exception as e:
+            st.error(f"❌ **{fname}**：{e}")
+            continue
+        out_path=stem+".txt"                     # 同名去重（不同資料夾已由相對路徑區隔）
+        if out_path in seen:
+            seen[out_path]+=1; out_path=f"{stem}({seen[out_path]}).txt"
+        else:
+            seen[out_path]=0
+        ok.append((out_path, text))
+        _ns=sum(len(s) for _,s in groups)
+        with st.container(border=True):
+            c1,c2=st.columns([4,1.2], vertical_alignment="center")
+            c1.markdown(f"✅ **{out_path}**　<span style='font-size:.8rem;color:#888'>"
+                        f"{len(groups)} 段 / {_ns} 張 / {len(text)} 字元</span>",
+                        unsafe_allow_html=True)
+            c2.download_button("⬇ .txt", text, out_path.rsplit("/",1)[-1], "text/plain",
+                               key=f"p2tdl_{idx}", use_container_width=True)
+            with st.expander("預覽"):
+                st.text(text)
+    if ok:
+        zbuf=io.BytesIO()
+        with zipfile.ZipFile(zbuf,"w",zipfile.ZIP_DEFLATED) as zf:
+            for path,text in ok: zf.writestr(path, text)
+        st.download_button(f"📦 全部下載（{len(ok)} 個 txt 打包 zip）", zbuf.getvalue(),
+                           "converted_txt.zip", "application/zip",
+                           key="p2tzip", use_container_width=True, type="primary")
+
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:
     _raw,_name=st.session_state.pop("_pending_new")
@@ -2497,6 +2571,9 @@ if "xml_content" not in st.session_state:
     st.divider()
     st.subheader("轉換（Pro7 → Pro6）", anchor=False)
     _convert_ui()
+    st.divider()
+    st.subheader("轉文字（.pro6 / .pro → txt）", anchor=False)
+    _pro2txt_ui()
     st.divider()
     st.subheader("創造（從文字產生新檔）", anchor=False)
     _create_ui()
@@ -2984,3 +3061,6 @@ with tab_new:
 # ─── TAB 5: 轉換（Pro7 .pro → .pro6，批次）───────────────────────
 with tab_conv:
     _convert_ui()
+    st.divider()
+    st.subheader("轉文字（.pro6 / .pro → txt）", anchor=False)
+    _pro2txt_ui()
