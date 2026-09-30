@@ -91,8 +91,8 @@ def test_preview_html(app):
     assert "a&lt;b&amp;c" in app._render_preview_html(xb2)
 
 
-# ── 轉換分頁：zip 收集 ──────────────────────────────────────────
-def test_collect_pro_files_zip(app):
+# ── 轉檔分頁：zip 收集（.pro6/.pro 都收、保留相對路徑）───────────
+def test_collect_convert_sources_zip(app):
     import io, zipfile
     class FakeUp:
         def __init__(self, name, data): self.name=name; self._d=data
@@ -101,13 +101,15 @@ def test_collect_pro_files_zip(app):
     with zipfile.ZipFile(zbuf,"w") as zf:
         zf.writestr("歌曲A.pro", b"\x0a\x01x")
         zf.writestr("sub/歌曲B.pro", b"\x0a\x01y")
+        zf.writestr("sub/歌曲C.pro6", b"<xml/>")
         zf.writestr("__MACOSX/._歌曲A.pro", b"junk")
         zf.writestr("讀我.txt", b"skip")
-    got=app._collect_pro_files([FakeUp("包.zip", zbuf.getvalue()),
-                                FakeUp("單檔.pro", b"\x0a\x01z")])
-    assert [(n, d) for n, d in got] == [("歌曲A", b"\x0a\x01x"),
-                                        ("歌曲B", b"\x0a\x01y"),
-                                        ("單檔", b"\x0a\x01z")]
+    got=app._collect_convert_sources([FakeUp("包.zip", zbuf.getvalue()),
+                                      FakeUp("單檔.pro", b"\x0a\x01z")])
+    assert got == [("歌曲A", "歌曲A.pro", b"\x0a\x01x"),
+                   ("sub/歌曲B", "歌曲B.pro", b"\x0a\x01y"),
+                   ("sub/歌曲C", "歌曲C.pro6", b"<xml/>"),
+                   ("單檔", "單檔.pro", b"\x0a\x01z")]
 
 
 # ── header-only RTF（Pro7 空文字層）不得掃出亂碼 ─────────────────

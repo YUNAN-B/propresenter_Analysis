@@ -5,8 +5,8 @@ ProParse · 投影片解析 · Streamlit App
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
 .pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
-分頁通用；「轉換」分頁另提供批次 .pro → .pro6（多檔、zip 打包），以及
-批次 .pro6/.pro → 純文字 txt（可上傳整包 zip、打包 zip 下載，沿用 pro2txt.py）。
+分頁通用；「轉檔」分頁提供批次轉檔：上傳 .pro/.pro6（或整包 zip）、選輸出格式，
+轉成 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，沿用 pro2txt.py），打包 zip 下載。
 
 ── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
   pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
@@ -1932,8 +1932,8 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 按錯了想反悔／反悔了又後悔 | 左側欄 ⟲（還原）⟳（重做） |
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
-| 把 Pro7 的 .pro 變成 .pro6 | **轉換** 分頁（可多檔、打包下載），或直接上傳 .pro |
-| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | **轉換** 分頁最下方「轉文字」（可上傳整包 zip、打包 zip 下載） |
+| 把 Pro7 的 .pro 變成 .pro6 | **轉檔** 分頁（選 .pro6，可多檔、打包下載），或直接上傳 .pro |
+| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | **轉檔** 分頁（選 .txt，可上傳整包 zip、打包 zip 下載） |
 | 一次把 N 行文字填進 N 張投影片 | **模板** → 最下方「大量填入文字」 |
 | 改檔案標題、看尺寸 | 左側欄最上面 |
 
@@ -1968,16 +1968,17 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 整行寫 **[主歌]**、**[副歌]** 這類標記，會自動分段＋上色，不用手動加空行。
 按文字框旁的「＋」開右欄＝雙語模式：左右逐行配對，一張投影片上排左欄、下排右欄。
 
-### 轉換（Pro7 → Pro6）
-上傳一個或多個 .pro（或整包 zip），逐檔顯示轉換結果，可單獨下載、多檔打包 zip、
+### 轉檔（選好輸出格式，批次轉）
+上傳一個或多個 .pro6 / .pro（或整包 zip，含子資料夾也可以），先選「轉檔後檔案類型」：
+
+**→ .pro6**（Pro7 轉 Pro6）：逐檔顯示轉換結果，可單獨下載、多檔打包 zip、
 或按「載入編輯」直接開始改。可順便做後處理：轉完直接套樣式、繁簡轉換，一次出貨。
 **會保留**：歌詞（字體/字級/顏色/位置原樣）、段落分組、標籤、熱鍵、備註、CCLI；
 檔內帶路徑的背景媒體會轉成路徑引用（進階選項可把原機路徑前綴換成目標機的）。
 **不會帶過來**：從媒體庫連結（檔內沒有路徑）的背景、特效、編曲順序。
 
-同分頁最下方另有「**轉文字**」：上傳 .pro6 / .pro（或整包 zip，含子資料夾也可以），
-每檔抽出歌詞轉成同名 .txt（[段落名] 標頭＋每張歌詞），全部打包 zip 下載，
-zip 內的資料夾結構原樣保留。
+**→ .txt**（抽歌詞）：每檔抽出歌詞轉成同名 .txt（[段落名] 標頭＋每張歌詞、
+張與張之間空一行），全部打包 zip 下載，zip 內的資料夾結構原樣保留。
 
 ---
 
@@ -2398,94 +2399,7 @@ def _zip_member_name(info) -> str:
         except Exception: pass
     return n
 
-def _collect_pro_files(ups) -> list:
-    """上傳清單（.pro / .zip）→ [(stem, bytes), ...]；zip 只取內部的 .pro。"""
-    out=[]
-    for up in ups:
-        raw=up.getvalue()
-        if up.name.lower().endswith(".zip"):
-            try:
-                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                    for info in zf.infolist():
-                        name=_zip_member_name(info)
-                        base=name.rsplit("/",1)[-1]
-                        if (not name.lower().endswith(".pro") or info.is_dir()
-                                or "__MACOSX" in name or base.startswith(".")):
-                            continue
-                        out.append((base.rsplit(".",1)[0], zf.read(info)))
-            except zipfile.BadZipFile:
-                st.error(f"❌ **{up.name}**：不是有效的 zip 檔")
-        else:
-            out.append((up.name.rsplit(".",1)[0], raw))
-    return out
-
-def _convert_ui():
-    """轉換：批次把 ProPresenter 7 的 .pro 轉成 .pro6（可下載、可直接載入編輯）。
-    文字圖層走「RTF 原封搬運」——字體/字級/顏色/斷行/位置全數保留；
-    段落群組（名稱+顏色）、投影片標籤、熱鍵、備註、CCLI 也一併帶過去；
-    有內嵌路徑的背景/媒體元素轉成路徑引用。可加後處理（套樣式、繁簡）。"""
-    st.caption("上傳 ProPresenter 7 的 **.pro**（或整包 **.zip**），轉成 ProPresenter 6 能直接開的 "
-               "**.pro6**。保留：文字圖層（字體/字級/顏色/位置/對齊）、段落群組、標籤、熱鍵、"
-               "備註、CCLI；檔內帶路徑的背景媒體會轉成路徑引用。不轉：從媒體庫連結（檔內無路徑）"
-               "的背景、特效、編曲順序。")
-    ups=st.file_uploader("上傳一個或多個 .pro / .zip", type=["pro","zip"],
-                         accept_multiple_files=True, key="conv_up")
-    if not ups: return
-
-    # ── 後處理選項：轉完順便做，多檔一次出貨 ──────────────────
-    _oc1,_oc2=st.columns(2)
-    _cc=_oc1.selectbox("轉換後繁簡處理", ["不變","繁 → 簡","簡 → 繁"], key="conv_cc")
-    _sty="不套用"
-    if _STYLES:
-        _sty=_oc2.selectbox("轉換後套用樣式", ["不套用"]+list(_STYLES.keys()), key="conv_style")
-    with st.expander("進階：媒體路徑前綴替換（把原機路徑換成目標機路徑）"):
-        st.caption("只影響檔內帶路徑的背景/媒體元素。例：原 `/Users/newmediamac/Documents`"
-                   "、新 `/Users/mac/Documents`。留空＝不替換。")
-        _po=st.text_input("原路徑前綴", key="conv_path_old")
-        _pn=st.text_input("新路徑前綴", key="conv_path_new")
-    _path_map=(_po.strip(), _pn.strip()) if _po.strip() else None
-
-    ok=[]                                        # (檔名stem, pro6 bytes)
-    for idx,(stem,raw) in enumerate(_collect_pro_files(ups)):
-        try:
-            nb,rep=pro7.pro7_to_pro6(raw, path_map=_path_map)
-            post=[]
-            if _sty!="不套用":
-                nb,_sn=_apply_style(nb,_sty); post.append(f"樣式×{_sn}")
-            if _cc!="不變":
-                nb,_cn,_=_apply_tc2sc(nb, reverse=(_cc=="簡 → 繁")); post.append(f"繁簡×{_cn}")
-        except Exception as e:
-            st.error(f"❌ **{stem}.pro**：{e}")
-            continue
-        ok.append((stem,nb))
-        with st.container(border=True):
-            c1,c2,c3=st.columns([4,1.2,1.2], vertical_alignment="center")
-            gsum="、".join(f"{n}×{c}" for n,c in rep["groups"][:8])
-            if len(rep["groups"])>8: gsum+="…"
-            _media=""
-            if rep.get("n_bg") or rep.get("n_media_el"):
-                _media=f"　·　背景 {rep.get('n_bg',0)} / 媒體元素 {rep.get('n_media_el',0)}"
-            c1.markdown(f"✅ **{rep['title'] or stem}**　"
-                        f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
-                        f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
-                        +(f"（含 {rep.get('n_empty',0)} 空層）" if rep.get("n_empty") else "")
-                        +(f"　·　略過 {rep['n_skipped']} 個元素" if rep["n_skipped"] else "")
-                        +_media+("　·　"+"、".join(post) if post else "")
-                        +f"<br>{gsum}</span>", unsafe_allow_html=True)
-            c2.download_button("⬇ .pro6", nb, stem+".pro6", "application/xml",
-                               key=f"convdl_{idx}_{stem}", use_container_width=True)
-            if c3.button("✏️ 載入編輯", key=f"convload_{idx}_{stem}",
-                         use_container_width=True):
-                _request_new(nb, stem+".pro6")
-    if len(ok)>1:                                # 多檔：加一鍵打包
-        zbuf=io.BytesIO()
-        with zipfile.ZipFile(zbuf,"w",zipfile.ZIP_DEFLATED) as zf:
-            for stem,nb in ok: zf.writestr(stem+".pro6", nb)
-        st.download_button(f"📦 全部下載（{len(ok)} 個 .pro6 打包 zip）", zbuf.getvalue(),
-                           "converted_pro6.zip", "application/zip",
-                           key="convzip", use_container_width=True, type="primary")
-
-def _collect_txt_sources(ups) -> list:
+def _collect_convert_sources(ups) -> list:
     """上傳清單（.pro6/.pro/.zip）→ [(輸出相對路徑stem, 顯示檔名, bytes), ...]；
     zip 取內部所有 .pro6/.pro（含子資料夾，輸出保留相對路徑）。"""
     out=[]
@@ -2507,18 +2421,73 @@ def _collect_txt_sources(ups) -> list:
             out.append((up.name.rsplit(".",1)[0], up.name, raw))
     return out
 
-def _pro2txt_ui():
-    """轉文字：批次把 .pro6 / .pro 轉成純文字 txt（重用 pro2txt.py），打包 zip 下載。"""
-    st.caption("上傳 **.pro6** / **.pro**（或整包 **.zip**，含子資料夾也可以），每檔轉出一個"
-               "同名 **.txt**（[段落名] 標頭＋每張歌詞、張與張之間空一行），"
-               "全部打包成 zip 下載。zip 內的子資料夾結構會原樣保留。")
-    ups=st.file_uploader("上傳一個或多個 .pro6 / .pro / .zip", type=["pro6","pro","zip"],
-                         accept_multiple_files=True, key="p2t_up")
-    if not ups: return
-    files=_collect_txt_sources(ups)
-    if not files:
-        st.warning("上傳內容裡沒有 .pro6 / .pro 檔。"); return
+def _convert_pro6_body(files):
+    """轉檔 → .pro6：批次把 ProPresenter 7 的 .pro 轉成 .pro6（可下載、可直接載入編輯）。
+    文字圖層走「RTF 原封搬運」——字體/字級/顏色/斷行/位置全數保留；
+    段落群組（名稱+顏色）、投影片標籤、熱鍵、備註、CCLI 也一併帶過去；
+    有內嵌路徑的背景/媒體元素轉成路徑引用。可加後處理（套樣式、繁簡）。"""
+    pros=[t for t in files if t[1].lower().endswith(".pro")]
+    if len(pros)<len(files):
+        st.info(f"已略過 {len(files)-len(pros)} 個 .pro6（已是目標格式）。")
+    if not pros:
+        st.warning("上傳內容裡沒有可轉的 .pro 檔。"); return
 
+    # ── 後處理選項：轉完順便做，多檔一次出貨 ──────────────────
+    _oc1,_oc2=st.columns(2)
+    _cc=_oc1.selectbox("轉換後繁簡處理", ["不變","繁 → 簡","簡 → 繁"], key="conv_cc")
+    _sty="不套用"
+    if _STYLES:
+        _sty=_oc2.selectbox("轉換後套用樣式", ["不套用"]+list(_STYLES.keys()), key="conv_style")
+    with st.expander("進階：媒體路徑前綴替換（把原機路徑換成目標機路徑）"):
+        st.caption("只影響檔內帶路徑的背景/媒體元素。例：原 `/Users/newmediamac/Documents`"
+                   "、新 `/Users/mac/Documents`。留空＝不替換。")
+        _po=st.text_input("原路徑前綴", key="conv_path_old")
+        _pn=st.text_input("新路徑前綴", key="conv_path_new")
+    _path_map=(_po.strip(), _pn.strip()) if _po.strip() else None
+
+    ok=[]                                        # (相對路徑stem, pro6 bytes)
+    for idx,(stem,fname,raw) in enumerate(pros):
+        base=stem.rsplit("/",1)[-1]              # 個別下載/載入編輯用檔名（去掉 zip 內路徑）
+        try:
+            nb,rep=pro7.pro7_to_pro6(raw, path_map=_path_map)
+            post=[]
+            if _sty!="不套用":
+                nb,_sn=_apply_style(nb,_sty); post.append(f"樣式×{_sn}")
+            if _cc!="不變":
+                nb,_cn,_=_apply_tc2sc(nb, reverse=(_cc=="簡 → 繁")); post.append(f"繁簡×{_cn}")
+        except Exception as e:
+            st.error(f"❌ **{fname}**：{e}")
+            continue
+        ok.append((stem,nb))
+        with st.container(border=True):
+            c1,c2,c3=st.columns([4,1.2,1.2], vertical_alignment="center")
+            gsum="、".join(f"{n}×{c}" for n,c in rep["groups"][:8])
+            if len(rep["groups"])>8: gsum+="…"
+            _media=""
+            if rep.get("n_bg") or rep.get("n_media_el"):
+                _media=f"　·　背景 {rep.get('n_bg',0)} / 媒體元素 {rep.get('n_media_el',0)}"
+            c1.markdown(f"✅ **{rep['title'] or base}**　"
+                        f"<span style='font-size:.8rem;color:#888'>{rep['width']}×{rep['height']}　"
+                        f"{rep['n_groups']} 段 / {rep['n_slides']} 張 / {rep['n_text']} 文字層"
+                        +(f"（含 {rep.get('n_empty',0)} 空層）" if rep.get("n_empty") else "")
+                        +(f"　·　略過 {rep['n_skipped']} 個元素" if rep["n_skipped"] else "")
+                        +_media+("　·　"+"、".join(post) if post else "")
+                        +f"<br>{gsum}</span>", unsafe_allow_html=True)
+            c2.download_button("⬇ .pro6", nb, base+".pro6", "application/xml",
+                               key=f"convdl_{idx}_{stem}", use_container_width=True)
+            if c3.button("✏️ 載入編輯", key=f"convload_{idx}_{stem}",
+                         use_container_width=True):
+                _request_new(nb, base+".pro6")
+    if len(ok)>1:                                # 多檔：加一鍵打包（zip 內保留相對路徑）
+        zbuf=io.BytesIO()
+        with zipfile.ZipFile(zbuf,"w",zipfile.ZIP_DEFLATED) as zf:
+            for stem,nb in ok: zf.writestr(stem+".pro6", nb)
+        st.download_button(f"📦 全部下載（{len(ok)} 個 .pro6 打包 zip）", zbuf.getvalue(),
+                           "converted_pro6.zip", "application/zip",
+                           key="convzip", use_container_width=True, type="primary")
+
+def _convert_txt_body(files):
+    """轉檔 → txt：批次抽出歌詞轉成純文字（重用 pro2txt.py），打包 zip 下載。"""
     ok=[]; seen={}                               # ok: (zip內路徑, txt字串)
     for idx,(stem,fname,raw) in enumerate(files):
         try:
@@ -2552,12 +2521,36 @@ def _pro2txt_ui():
                            "converted_txt.zip", "application/zip",
                            key="p2tzip", use_container_width=True, type="primary")
 
+def _transcode_ui():
+    """轉檔：上傳 .pro6/.pro（或整包 zip），選擇輸出格式後批次轉換＋打包下載。
+    輸出 .pro6 → _convert_pro6_body（Pro7 轉 Pro6）；輸出 .txt → _convert_txt_body（抽歌詞）。"""
+    _fmt=st.radio("轉檔後檔案類型",
+                  [".pro6（ProPresenter 6 簡報檔）", ".txt（純文字歌詞）"],
+                  horizontal=True, key="tc_fmt")
+    _to_txt=(_fmt or "").startswith(".txt")     # 或運算：tests 的 st 替身 radio 回 None
+    if _to_txt:
+        st.caption("上傳 **.pro6** / **.pro**（或整包 **.zip**，含子資料夾也可以），每檔抽出歌詞"
+                   "轉成同名 **.txt**（[段落名] 標頭＋每張歌詞、張與張之間空一行），"
+                   "全部打包成 zip 下載。zip 內的子資料夾結構會原樣保留。")
+    else:
+        st.caption("上傳 ProPresenter 7 的 **.pro**（或整包 **.zip**），轉成 ProPresenter 6 能"
+                   "直接開的 **.pro6**。保留：文字圖層（字體/字級/顏色/位置/對齊）、段落群組、"
+                   "標籤、熱鍵、備註、CCLI；檔內帶路徑的背景媒體會轉成路徑引用。不轉：從媒體庫"
+                   "連結（檔內無路徑）的背景、特效、編曲順序。")
+    ups=st.file_uploader("上傳一個或多個 .pro6 / .pro / .zip", type=["pro6","pro","zip"],
+                         accept_multiple_files=True, key="tc_up")
+    if not ups: return
+    files=_collect_convert_sources(ups)
+    if not files:
+        st.warning("上傳內容裡沒有 .pro6 / .pro 檔。"); return
+    (_convert_txt_body if _to_txt else _convert_pro6_body)(files)
+
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:
     _raw,_name=st.session_state.pop("_pending_new")
     _load_new_doc(_raw,_name)
 
-# ── Upload / 轉換 / 創造 ────────────────────────────────────────
+# ── Upload / 轉檔 / 創造 ────────────────────────────────────────
 st.title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
 uploaded = st.file_uploader("上傳 .pro6 / .xml，或 ProPresenter 7 的 .pro（自動轉換）",
                             type=["xml","pro6","pro"])
@@ -2569,11 +2562,8 @@ if st.session_state.get("_pro7_err"):
     st.error("⚠️ "+st.session_state.pop("_pro7_err"))
 if "xml_content" not in st.session_state:
     st.divider()
-    st.subheader("轉換（Pro7 → Pro6）", anchor=False)
-    _convert_ui()
-    st.divider()
-    st.subheader("轉文字（.pro6 / .pro → txt）", anchor=False)
-    _pro2txt_ui()
+    st.subheader("轉檔（.pro / .pro6 → .pro6 或 txt）", anchor=False)
+    _transcode_ui()
     st.divider()
     st.subheader("創造（從文字產生新檔）", anchor=False)
     _create_ui()
@@ -2658,7 +2648,7 @@ if st.session_state.get("_tpl_msg"):
 
 # ── Tabs ───────────────────────────────────────────────────────
 tab_parse, tab_tpl, tab_text, tab_new, tab_conv = st.tabs(
-    ["解析", "模板", "撰寫", "創造", "轉換"])
+    ["解析", "模板", "撰寫", "創造", "轉檔"])
 
 
 # ─── TAB 1: 解析 ──────────────────────────────────────────────
@@ -3058,9 +3048,6 @@ with tab_new:
     _create_ui()
 
 
-# ─── TAB 5: 轉換（Pro7 .pro → .pro6，批次）───────────────────────
+# ─── TAB 5: 轉檔（.pro/.pro6 → .pro6 或 txt，批次）───────────────
 with tab_conv:
-    _convert_ui()
-    st.divider()
-    st.subheader("轉文字（.pro6 / .pro → txt）", anchor=False)
-    _pro2txt_ui()
+    _transcode_ui()
