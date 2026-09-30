@@ -2510,7 +2510,7 @@ def _convert_txt_body(files, kp="p2t", compact=False):
         ok.append((out_path, text))
         _ns=sum(len(s) for _,s in groups)
         if compact:
-            rows.append(f"✅ {_html_esc(out_path)}　<span style='color:#888'>"
+            rows.append(f"{_html_esc(out_path)}　<span style='color:#888'>"
                         f"{len(groups)} 段 / {_ns} 張 / {len(text)} 字元</span>")
             continue
         with st.container(border=True):
