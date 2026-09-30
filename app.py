@@ -5,9 +5,9 @@ ProParse · 投影片解析 · Streamlit App
 線上版 https://proparse.streamlit.app/ ；單一檔，無外部後端。
 也支援 ProPresenter 7 的 .pro（protobuf）：上傳/拖放即由 pro7.py 自動轉成
 .pro6 再載入（文字 RTF 原封搬運、群組/標籤/熱鍵/備註/CCLI 保留），之後所有
-分頁通用；大標題右側另有三顆轉檔按鈕（7→6 / 67→txt / zip→zip，
-滑過看說明、按下展開選檔）：批次轉 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，
-沿用 pro2txt.py），打包 zip 下載。
+分頁通用；「轉檔」分頁有三顆模式按鈕（7→6 / 67→txt / zip→zip，滑過看說明、
+按下展開選檔）：批次轉 .pro6（Pro7→Pro6）或純文字 txt（抽歌詞，沿用
+pro2txt.py），打包 zip 下載。未載檔時五個分頁照常顯示、初始落在「創造」。
 
 ── 術語 ①：ProPresenter / pro6 結構（程式裡到處都是；節點都靠 rvXMLIvarName 找）──────
   pro6 / .pro6 ...... ProPresenter 6 的簡報檔，本質就是一份 XML（utf-8）。
@@ -1933,14 +1933,14 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 | 按錯了想反悔／反悔了又後悔 | 左側欄 ⟲（還原）⟳（重做） |
 | 貼一段歌詞直接做出新檔 | **創造** 分頁 |
 | 做中英雙語對照（上中下英） | **創造** → 按文字框旁的「＋」開右欄 |
-| 把 Pro7 的 .pro 變成 .pro6 | 標題右側 **7→6** 按鈕（可多檔/整包 zip、打包下載），或直接上傳 .pro |
-| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | 標題右側 **67→txt** 按鈕；整包 zip 用 **zip→zip** |
+| 把 Pro7 的 .pro 變成 .pro6 | **轉檔** 分頁 → **7→6**（可多檔/整包 zip、打包下載），或直接上傳 .pro |
+| 把一堆 .pro6 / .pro 抽出歌詞存成 txt | **轉檔** 分頁 → **67→txt**；整包 zip 用 **zip→zip** |
 | 一次把 N 行文字填進 N 張投影片 | **模板** → 最下方「大量填入文字」 |
 | 改檔案標題、看尺寸 | 左側欄最上面 |
 
 ---
 
-## 四個分頁＋轉檔按鈕在做什麼
+## 五個分頁在做什麼
 
 ### 解析（只看、不會改到檔案）
 這邊有整個檔案的詳細資訊，每張投影片屬於哪個段落、每個圖層的位置/字體/字級/顏色/陰影等等，
@@ -1969,8 +1969,8 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 整行寫 **[主歌]**、**[副歌]** 這類標記，會自動分段＋上色，不用手動加空行。
 按文字框旁的「＋」開右欄＝雙語模式：左右逐行配對，一張投影片上排左欄、下排右欄。
 
-### 轉檔（標題右側的小按鈕）
-大標題右邊有三顆轉檔按鈕，**滑鼠移到按鈕上會浮出該模式的詳細說明**；
+### 轉檔（三種模式）
+分頁裡有三顆模式按鈕（各有自己的顏色），**滑鼠移到按鈕上會浮出該模式的詳細說明**；
 按下去才會展開選檔欄位（再按一次或按 ✕ 收合）：
 
 - **7→6**：Pro7 的 .pro（可整包 zip）→ .pro6。逐檔顯示結果，可單獨下載、
@@ -2565,35 +2565,34 @@ def _transcode_panel(mode):
             st.warning("上傳內容裡沒有 .pro6 / .pro 檔。"); return
         (_convert_txt_body if to_txt else _convert_pro6_body)(files)
 
+def _transcode_tab():
+    """轉檔分頁：三顆模式按鈕（各配識別色，滑過看詳細說明）→ 按下展開選檔面板。"""
+    st.markdown("<style>"
+                # 每顆模式按鈕用該模式的識別色（未選＝色框色字、hover 淡底、選中＝實心填色）
+                +"".join(
+                    f"[class*='st-key-tcbtn_{_m}'] button{{border:1px solid {_c}99;color:{_c};}}"
+                    f"[class*='st-key-tcbtn_{_m}'] button:hover{{border-color:{_c};background:{_c}1a;}}"
+                    f"[class*='st-key-tcbtn_{_m}'] button[kind='primary']{{background:{_c}!important;"
+                    f"border-color:{_c}!important;color:#fff!important;}}"
+                    for _m,(_l,_t,_x,_c,_p) in _TC_MODES.items())
+                +"</style>", unsafe_allow_html=True)
+    st.caption("選一種轉檔模式（滑鼠移到按鈕上有詳細說明），按下後選擇檔案：")
+    _bc=st.columns([1,1,1,2.2])
+    for _c,(_m,(_lbl,_ty,_tt,_col,_tip)) in zip(_bc, _TC_MODES.items()):
+        if _c.button(_lbl, key=f"tcbtn_{_m}", help=_tip, use_container_width=True,
+                     type="primary" if st.session_state.get("tc_mode")==_m else "secondary"):
+            if st.session_state.get("tc_mode")==_m: st.session_state.pop("tc_mode",None)
+            else: st.session_state["tc_mode"]=_m
+            st.rerun()
+    if st.session_state.get("tc_mode") in _TC_MODES:
+        _transcode_panel(st.session_state["tc_mode"])
+
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:
     _raw,_name=st.session_state.pop("_pending_new")
     _load_new_doc(_raw,_name)
 
-# ── 標題列（左：大標題；右：轉檔小按鈕列，按下才展開選檔面板）────
-# 按鈕滑鼠移過即顯示該模式的詳細說明（help tooltip）；再按一次同鈕＝收合。
-st.markdown("<style>[class*='st-key-tcbtn_'] button,[class*='st-key-tc_close'] button{"
-            "min-height:1.7rem;height:1.7rem;padding:0 .55rem;font-size:.78rem;"
-            "border-radius:6px;}"
-            # 每顆按鈕用該模式的識別色（未選＝色框色字、hover 淡底、選中＝實心填色）
-            +"".join(
-                f"[class*='st-key-tcbtn_{_m}'] button{{border:1px solid {_c}99;color:{_c};}}"
-                f"[class*='st-key-tcbtn_{_m}'] button:hover{{border-color:{_c};background:{_c}1a;}}"
-                f"[class*='st-key-tcbtn_{_m}'] button[kind='primary']{{background:{_c}!important;"
-                f"border-color:{_c}!important;color:#fff!important;}}"
-                for _m,(_l,_t,_x,_c,_p) in _TC_MODES.items())
-            +"</style>", unsafe_allow_html=True)
-_trow=st.columns([4.5,.8,1,1.05], vertical_alignment="center")
-_trow[0].title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
-for _c,(_m,(_lbl,_ty,_tt,_col,_tip)) in zip(_trow[1:], _TC_MODES.items()):
-    if _c.button(_lbl, key=f"tcbtn_{_m}", help=_tip, use_container_width=True,
-                 type="primary" if st.session_state.get("tc_mode")==_m else "secondary"):
-        if st.session_state.get("tc_mode")==_m: st.session_state.pop("tc_mode",None)
-        else: st.session_state["tc_mode"]=_m
-        st.rerun()
-if st.session_state.get("tc_mode") in _TC_MODES:
-    _transcode_panel(st.session_state["tc_mode"])
-
+st.title("ProParse · 投影片解析", anchor=False)   # 單頁工具，錨點連結鈕無用
 uploaded = st.file_uploader("上傳 .pro6 / .xml，或 ProPresenter 7 的 .pro（自動轉換）",
                             type=["xml","pro6","pro"])
 if uploaded is not None:
@@ -2603,9 +2602,29 @@ if uploaded is not None:
 if st.session_state.get("_pro7_err"):
     st.error("⚠️ "+st.session_state.pop("_pro7_err"))
 if "xml_content" not in st.session_state:
-    st.divider()
-    st.subheader("創造（從文字產生新檔）", anchor=False)
-    _create_ui()
+    # 尚未載入檔案：一樣給五個分頁，但解析/模板/撰寫沒有資訊；
+    # 用 JS 點一下「創造」讓初始畫面落在創造分頁（st.tabs 預設落在第一頁、
+    # 且不提供程式選頁）。旗標掛在父視窗：rerun 重建 iframe 也只會點這一次，
+    # 之後使用者自己切分頁不會被拉回來。
+    _t_parse,_t_tpl,_t_text,_t_new,_t_conv=st.tabs(["解析","模板","撰寫","創造","轉檔"])
+    for _t in (_t_parse,_t_tpl,_t_text):
+        with _t: st.caption("尚未載入檔案。")
+    with _t_new:
+        _create_ui()
+    with _t_conv:
+        _transcode_tab()
+    components.html("""<script>
+    (function(){
+      const P=window.parent;
+      if(P.__pp_tab_init__)return; P.__pp_tab_init__=true;
+      let n=0;
+      const t=setInterval(()=>{
+        const btns=P.document.querySelectorAll('[data-baseweb="tab-list"] button');
+        if(btns.length>=4){ btns[3].click(); clearInterval(t); }
+        else if(++n>40) clearInterval(t);
+      },100);
+    })();
+    </script>""", height=0)
     st.stop()
 
 xml_bytes=st.session_state["xml_content"]
@@ -2691,8 +2710,8 @@ if st.session_state.get("_tpl_msg"):
     st.toast(st.session_state.pop("_tpl_msg"))
 
 # ── Tabs ───────────────────────────────────────────────────────
-tab_parse, tab_tpl, tab_text, tab_new = st.tabs(
-    ["解析", "模板", "撰寫", "創造"])
+tab_parse, tab_tpl, tab_text, tab_new, tab_conv = st.tabs(
+    ["解析", "模板", "撰寫", "創造", "轉檔"])
 
 
 # ─── TAB 1: 解析 ──────────────────────────────────────────────
@@ -3090,3 +3109,8 @@ with tab_text:
 with tab_new:
     st.caption("產生後會以新檔取代目前的編輯對象（記得先匯出舊檔）。")
     _create_ui()
+
+
+# ─── TAB 5: 轉檔（7→6 / 67→txt / zip→zip，批次）──────────────────
+with tab_conv:
+    _transcode_tab()
