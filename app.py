@@ -2023,9 +2023,8 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 """
 
-# page_title 就是 Google 搜尋結果的標題（Streamlit 的 <title>），放品牌＋關鍵字
 st.set_page_config(
-    page_title="ProParse · ProPresenter 6/7 歌詞投影片編輯・轉檔工具",
+    page_title="ProParse · 投影片解析",
     page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "hard-hat.png"),
     layout="wide",
     menu_items={"About": _ABOUT_TEXT},
