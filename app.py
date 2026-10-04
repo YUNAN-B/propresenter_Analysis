@@ -2023,12 +2023,34 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 
 """
 
+# page_title 就是 Google 搜尋結果的標題（Streamlit 的 <title>），放品牌＋關鍵字
 st.set_page_config(
-    page_title="ProParse · 投影片解析",
+    page_title="ProParse · ProPresenter 6/7 歌詞投影片編輯・轉檔工具",
     page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "hard-hat.png"),
     layout="wide",
     menu_items={"About": _ABOUT_TEXT},
 )
+
+# SEO：Streamlit 無法直接改 <head>，由 components iframe（同源）把 meta
+# description / Open Graph 塞進父頁 head——Google 轉譯 JS 後讀得到，
+# 分享到社群也有標題與描述。旗標防 rerun 重複插入。
+components.html("""<script>
+(function(){
+  const P=window.parent;
+  if(P.__pp_meta__)return; P.__pp_meta__=true;
+  const doc=P.document, head=doc.head;
+  const DESC="免費線上工具：解析與批次編輯 ProPresenter 6 投影片（.pro6），"
+    +"ProPresenter 7（.pro）轉 .pro6、歌詞批次匯出 txt（可整包 zip）、"
+    +"繁簡轉換、拼音標註、雙語歌詞排版、從純文字產生投影片。";
+  const add=(attrs)=>{const m=doc.createElement('meta');
+    for(const k in attrs)m.setAttribute(k,attrs[k]); head.appendChild(m);};
+  if(!doc.querySelector('meta[name="description"]'))
+    add({name:"description",content:DESC});
+  add({property:"og:title",content:"ProParse · ProPresenter 6/7 歌詞投影片編輯・轉檔工具"});
+  add({property:"og:description",content:DESC});
+  add({property:"og:type",content:"website"});
+})();
+</script>""", height=0)
 
 st.markdown("""
 <style>
