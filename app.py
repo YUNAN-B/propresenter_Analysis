@@ -2060,17 +2060,79 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
 [class*="st-key-sidebar_export"]{position:sticky;bottom:0;z-index:5;
   padding:.5rem 0 .25rem;border-top:1px solid rgba(128,128,128,.25);}
 
-/* 手機專用匯出鈕：桌機隱藏（桌機用側欄那顆即可） */
-[class*="st-key-mobile_export"]{display:none;}
+/* 手機專用操作列（還原／重做／匯出）：桌機隱藏（桌機用側欄那組即可）。
+   外層 stLayoutWrapper 改 display:contents，隱藏/固定定位時都不留一格空隙。 */
+[data-testid="stLayoutWrapper"]:has(>[class*="st-key-mobile_bar"]){display:contents;}
+[class*="st-key-mobile_bar"]{display:none;}
 
-/* ── 手機 / 窄螢幕響應式（≤640px）：欄位改直排、留白縮小，維持可上傳/編輯/匯出 ── */
-@media (max-width:640px){
-  /* 手機顯示主畫面那顆匯出鈕 */
-  [class*="st-key-mobile_export"]{display:block!important;}
-  /* 主內容左右留白縮小，編輯區更寬 */
+/* ── 手機 / 平板直向（≤768px＝Streamlit 側欄自動收合的斷點）：觸控操作面 ──
+   側欄收起來後，分頁／還原／匯出都要「不必捲回頂端、不必開側欄」就按得到。 */
+@media (max-width:768px){
+  /* 主內容左右留白縮小；上方留白只留給固定的頂列（3.75rem） */
   .block-container,[data-testid="stMainBlockContainer"]{
     padding-left:.7rem!important;padding-right:.7rem!important;
-    padding-top:2.6rem!important;padding-bottom:3rem!important;}
+    padding-top:4rem!important;padding-bottom:3rem!important;}
+  /* 有底部操作列時，內容底部多留空間，最後一個輸入框才不會被擋住 */
+  [data-testid="stMainBlockContainer"]:has([class*="st-key-mobile_bar"]){
+    padding-bottom:6rem!important;}
+  /* 只放 <script>/<style> 的零高度元素不佔版面間距（components.html 在本工具全是 height=0 的腳本）
+     ——否則標題上方平白多出好幾格空白 */
+  [data-testid="stElementContainer"]:has(>[data-testid="stIFrame"]),
+  [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"]>style:only-child){
+    position:absolute!important;width:0;height:0;overflow:hidden;}
+  h1{font-size:1.4rem!important;padding:.25rem 0 .5rem!important;}
+
+  /* 分頁列固定在頂列下方：長頁面（撰寫／模板）捲到一半也能直接切分頁。
+     sticky 要掛在 tab-list 的外層（tab-list 自己的父層只有它一個孩子，黏不住）。 */
+  .stTabs div:has(>[data-baseweb="tab-list"]){position:sticky;top:3.75rem;z-index:40;
+    background:var(--pp-bg,#fff);margin:0 -.7rem;padding:0 .7rem;
+    box-shadow:0 1px 0 rgba(128,128,128,.25);}
+  /* 五個分頁平均分配寬度、加大點擊高度；320px 的小螢幕也排得下（排不下時可橫向捲動） */
+  .stTabs [data-baseweb="tab-list"]{gap:0!important;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .stTabs [data-baseweb="tab"]{flex:1 0 auto;justify-content:center;min-height:2.75rem;
+    padding:.4rem .6rem!important;font-size:.9rem!important;}
+
+  /* 底部固定操作列：⟲ ⟳ ＋ 匯出，拇指就按得到 */
+  [class*="st-key-mobile_bar"]{display:flex!important;flex-direction:row!important;
+    flex-wrap:nowrap!important;align-items:center;gap:.5rem!important;
+    position:fixed;left:0;right:0;bottom:0;z-index:100;width:auto!important;
+    padding:.5rem .7rem calc(.5rem + env(safe-area-inset-bottom,0px));
+    background:var(--pp-bg,#fff);border-top:1px solid rgba(128,128,128,.25);
+    box-shadow:0 -2px 10px rgba(0,0,0,.08);}
+  [class*="st-key-m_undo"],[class*="st-key-m_redo"]{flex:0 0 auto!important;width:auto!important;}
+  [class*="st-key-m_undo"] button,[class*="st-key-m_redo"] button{
+    width:2.75rem!important;height:2.75rem!important;padding:0;min-height:0;}
+  [class*="st-key-m_undo"] button p,[class*="st-key-m_redo"] button p{
+    font-size:1.4rem!important;font-weight:700;line-height:1;}
+  [class*="st-key-dl_mobile"]{flex:1 1 0!important;min-width:0!important;width:auto!important;}
+  [class*="st-key-dl_mobile"] button{width:100%!important;height:2.75rem;min-width:0;}
+  [class*="st-key-dl_mobile"] button *{min-width:0;}
+  [class*="st-key-dl_mobile"] button p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  /* 觸控：關掉雙擊縮放的延遲；按鈕至少 44px 高；？說明圖示加大可點範圍 */
+  button,[role="tab"],label,summary{touch-action:manipulation;}
+  .stButton>button,.stDownloadButton>button,[data-testid="stPopover"] button{min-height:2.75rem;}
+  [class*="st-key-grpbtn_"] button{min-height:2.5rem;padding:.3rem .6rem;}
+  [data-testid="stTooltipIcon"]{padding:.5rem;margin:-.5rem;box-sizing:content-box;}
+  /* 撰寫頁控制列：熱鍵／上下移／刪除放大到 44px */
+  [class*="st-key-hk_"]{width:2.75rem!important;}
+  [class*="st-key-hk_"] input{width:2.75rem!important;height:2.75rem!important;}
+  [class*="st-key-delbtn_"] button,[class*="st-key-mvup_"] button,[class*="st-key-mvdn_"] button{
+    width:2.75rem!important;height:2.75rem!important;}
+  /* 輸入框字級一律 ≥16px：iOS Safari 遇到 <16px 的輸入框，聚焦時會自動放大整頁 */
+  input,textarea,select{font-size:16px!important;}
+  [class*="st-key-ln_"] input{height:2.4rem;padding:.3rem .5rem;}
+
+  /* 還原/重做（側欄）與確認框的「確認｜取消」維持左右並排，不被下面 ≤640 的直排規則拆開 */
+  [class*="st-key-sb_undo"] [data-testid="stColumn"],
+  [data-testid="stDialog"] [data-testid="stColumn"]{min-width:0!important;flex:1 1 0!important;}
+  /* 解析頁視覺預覽：縮圖置中 */
+  .pv-grid{justify-content:center;}
+  .stCodeBlock,code,pre{font-size:.7rem!important;}
+}
+
+/* ── 手機 / 窄螢幕（≤640px）：欄位改直排 ── */
+@media (max-width:640px){
   /* st.columns 在窄螢幕各自佔滿整列＝自動直排（模板 3 欄格、創造左右欄、撰寫頁標頭/控制列等） */
   [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.45rem!important;}
   [data-testid="stColumn"],[data-testid="column"]{min-width:100%!important;flex:1 1 100%!important;}
@@ -2078,13 +2140,11 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   [class*="st-key-hk_"],[class*="st-key-grppop_"],[class*="st-key-delbtn_"],
   [class*="st-key-mvup_"],[class*="st-key-mvdn_"]{
     min-width:0!important;flex:0 0 auto!important;}
-  [class*="st-key-ln_"] input{font-size:.72rem;}
-  /* 分頁標籤縮小、可橫向捲動，避免四個分頁擠爆 */
-  .stTabs [data-baseweb="tab-list"]{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .stTabs [data-baseweb="tab"]{padding:.4rem .9rem!important;font-size:.85rem!important;}
-  /* 標題與大量填入/解析的程式碼字級略縮 */
-  h1{font-size:1.5rem!important;}
-  .stCodeBlock,code,pre{font-size:.7rem!important;}
+  /* 轉檔結果卡：檔名佔一整列，下方「下載｜載入編輯」左右並排 */
+  [class*="st-key-tc_panel_"] [data-testid="stColumn"]:not(:first-child){
+    min-width:0!important;flex:1 1 0!important;}
+  /* 創造：「＋」鈕直排後不需要對齊文字框用的墊高 */
+  .pp-spacer{display:none;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -2093,8 +2153,11 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
 # st.context.theme 需 Streamlit ≥1.46；不可用時（舊版/測試 stub）退回淺色。
 try: _sb_dark = st.context.theme.type == "dark"
 except Exception: _sb_dark = False
+# --pp-bg＝主畫面底色，給手機的固定分頁列／底部操作列當不透明底（內容才不會透出來）。
 st.markdown(f"<style>[class*='st-key-sidebar_export']{{background:"
-            f"{'#262730' if _sb_dark else '#f0f2f6'};}}</style>", unsafe_allow_html=True)
+            f"{'#262730' if _sb_dark else '#f0f2f6'};}}"
+            f":root{{--pp-bg:{'#0e1117' if _sb_dark else '#ffffff'};}}</style>",
+            unsafe_allow_html=True)
 
 # ── 整頁拖放上傳 ────────────────────────────────────────────────
 # st.file_uploader 只吃拖進它自己框內的檔案；這裡經 components 的 iframe（同源，
@@ -2142,7 +2205,8 @@ components.html("""<script>
     if(!files.length||!inputs.length)return;
 
     const accepts=(inp,f)=>{
-      const acc=(inp.getAttribute('accept')||'').toLowerCase();
+      // 手機上 accept 會被下方腳本移到 data-pp-accept（見「手機選檔」）
+      const acc=(inp.dataset.ppAccept||inp.getAttribute('accept')||'').toLowerCase();
       if(!acc)return true;
       const ext='.'+f.name.split('.').pop().toLowerCase();
       return acc.split(',').map(s=>s.trim()).includes(ext);
@@ -2162,6 +2226,46 @@ components.html("""<script>
     }
   },true);
 })();
+
+// ── 手機選檔 ──────────────────────────────────────────────────
+// iOS Safari 的檔案選擇器不認 accept 裡的「副檔名」寫法：系統不認得的類型
+// （.pro6 / .pro）會整排反灰選不了，只剩 .xml / .zip / .txt 能點。
+// 手機/平板上把 <input> 的 accept 拿掉（原值留在 data-pp-accept），讓選擇器
+// 列出所有檔案；副檔名仍由 Streamlit 上傳元件自己在前端檢查，選錯會照常報錯。
+(function(){
+  const P=window.parent;
+  if(P.__pp_mob__)return; P.__pp_mob__=true;
+  const nav=P.navigator, ua=nav.userAgent||'';
+  const touchDev=/iPhone|iPad|iPod|Android/i.test(ua)
+    ||(/Macintosh/.test(ua)&&nav.maxTouchPoints>1);          // iPadOS 會自稱 Mac
+  if(!touchDev)return;
+  const doc=P.document;
+  const strip=()=>doc.querySelectorAll(
+    '[data-testid="stFileUploader"] input[type="file"][accept]').forEach(i=>{
+      i.dataset.ppAccept=i.getAttribute('accept'); i.removeAttribute('accept');});
+  strip();
+  new P.MutationObserver(strip).observe(doc.body,
+    {childList:true,subtree:true,attributes:true,attributeFilter:['accept']});
+})();
+
+// ── --pp-bg 跟著實際主題走 ─────────────────────────────────────
+// 手機的固定分頁列／底部操作列要不透明底色。Python 端的 st.context.theme 只在
+// rerun 時更新（系統明暗切換不會觸發 rerun），所以這裡直接讀 stApp 算出來的底色
+// 寫進 :root：每次 rerun（iframe 重建）同步一次，系統明暗切換時再同步一次。
+(function(){
+  const P=window.parent, doc=P.document;
+  const sync=()=>{
+    const a=doc.querySelector('[data-testid="stApp"]'); if(!a)return;
+    const c=P.getComputedStyle(a).backgroundColor;
+    if(c)doc.documentElement.style.setProperty('--pp-bg',c);
+  };
+  sync();
+  if(P.__pp_bg__)return; P.__pp_bg__=true;
+  const later=()=>{[150,600,1500].forEach(t=>P.setTimeout(sync,t));};
+  P.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',later);
+  const app=doc.querySelector('[data-testid="stApp"]');
+  if(app)new P.MutationObserver(later).observe(app,{attributes:true,attributeFilter:['class','style']});
+})();
 </script>""", height=0)
 
 def _push_undo():
@@ -2172,6 +2276,33 @@ def _push_undo():
     us.append(zlib.compress(st.session_state["xml_content"]))
     if len(us)>50: del us[:len(us)-50]
     st.session_state["redo_stack"]=[]      # 新的編輯使「重做」失效（標準 undo/redo 語意）
+
+def _clear_widget_cache():
+    """整份內容被換掉（還原/重做）後，清掉輸入框的 widget 快取，避免沿用舊值。"""
+    for k in [k for k in st.session_state
+              if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
+        st.session_state.pop(k, None)
+
+def _do_undo():
+    """還原上一步（側欄與手機底部操作列共用）。現況連同歷史標籤入重做堆疊。"""
+    ss=st.session_state
+    _undo=ss.get("undo_stack", [])
+    if not _undo: return
+    _lbl=ss["history"].pop() if ss.get("history") else ""
+    ss.setdefault("redo_stack", []).append((zlib.compress(ss["xml_content"]), _lbl))
+    ss["xml_content"]=zlib.decompress(_undo.pop())
+    _clear_widget_cache(); st.rerun()
+
+def _do_redo():
+    """重做（取消上一次還原）。直接 append 回 undo 堆疊，不經 _push_undo（那會清空重做）。"""
+    ss=st.session_state
+    _redo=ss.get("redo_stack", [])
+    if not _redo: return
+    _nb,_lbl=_redo.pop()
+    ss.setdefault("undo_stack", []).append(zlib.compress(ss["xml_content"]))
+    ss["xml_content"]=zlib.decompress(_nb)
+    if _lbl: ss.setdefault("history", []).append(_lbl)
+    _clear_widget_cache(); st.rerun()
 
 def _soft_reset():
     """卡住時的自救：清全域快取 + 所有暫態旗標，把檔案還原到剛載入的狀態。"""
@@ -2325,7 +2456,8 @@ def _create_ui():
         col_t, col_b = st.columns([12,1])
         txt=col_t.text_area("或在此貼上文字", key="create_text", height=240,
                             placeholder="第一張投影片\n（段內可多行）\n\n第二張投影片\n\n第三張…")
-        col_b.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+        col_b.markdown("<div class='pp-spacer' style='height:1.75rem'></div>",
+                       unsafe_allow_html=True)
         if col_b.button("＋", key="create_add", help="新增右欄，做雙排（雙語）逐行配對"):
             st.session_state["create_dual"]=True; st.rerun()
         d1,d2=st.columns(2)
@@ -2687,26 +2819,14 @@ with st.sidebar:
         st.caption("→ ".join(st.session_state["history"][-6:]))
     _undo=st.session_state.get("undo_stack", [])
     _redo=st.session_state.setdefault("redo_stack", [])
-    def _clear_widget_cache():
-        for k in [k for k in st.session_state
-                  if k.startswith(("txt_","empty_","grp_","hk_","ln_","doc_"))]:
-            st.session_state.pop(k, None)
-    _uc,_rc=st.columns(2)
-    if _uc.button("⟲", key="undo_btn", use_container_width=True, disabled=not _undo,
-                  help="還原（復原上一步）"):
-        _cur=st.session_state["xml_content"]
-        _lbl=st.session_state["history"].pop() if st.session_state.get("history") else ""
-        _redo.append((zlib.compress(_cur), _lbl))     # 現況入重做堆疊（連同歷史標籤）
-        st.session_state["xml_content"]=zlib.decompress(_undo.pop())
-        _clear_widget_cache(); st.rerun()
-    if _rc.button("⟳", key="redo_btn", use_container_width=True, disabled=not _redo,
-                  help="重做（取消上一次還原）"):
-        _cur=st.session_state["xml_content"]
-        _nb,_lbl=_redo.pop()
-        _undo.append(zlib.compress(_cur))             # 直接 append，不經 _push_undo（那會清空重做）
-        st.session_state["xml_content"]=zlib.decompress(_nb)
-        if _lbl: st.session_state["history"].append(_lbl)
-        _clear_widget_cache(); st.rerun()
+    with st.container(key="sb_undo"):                 # key 供手機 CSS 讓兩顆維持並排
+        _uc,_rc=st.columns(2)
+        if _uc.button("⟲", key="undo_btn", use_container_width=True, disabled=not _undo,
+                      help="還原（復原上一步）"):
+            _do_undo()
+        if _rc.button("⟳", key="redo_btn", use_container_width=True, disabled=not _redo,
+                      help="重做（取消上一次還原）"):
+            _do_redo()
     # 匯出區：放側欄最末＋sticky CSS 釘在底部（自帶上邊線，區隔不靠 divider）
     # 上方資訊區滾動時不動
     with st.container(key="sidebar_export"):
@@ -2717,8 +2837,17 @@ with st.sidebar:
         st.download_button(f"匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
                            "application/xml", use_container_width=True)
 
-# 手機專用：主畫面頂端也放一顆匯出鈕（桌機用 CSS 隱藏，免得手機要先開側欄才能下載）
-with st.container(key="mobile_export"):
+# 手機專用：固定在畫面底部的操作列（⟲ ⟳ ＋ 匯出）。桌機用 CSS 隱藏；
+# 手機側欄預設收合，還原/匯出若只在側欄，每次都得先開側欄、長頁面還要捲回頂端。
+# 兩顆箭頭不設 disabled：撰寫頁是 fragment，改完字只重跑該區塊、這一列不會重繪，
+# 用 disabled 會卡在「改了字卻還是灰的」；改成永遠可按，沒有步驟時飄提示。
+with st.container(key="mobile_bar"):
+    if st.button("⟲", key="m_undo"):
+        if st.session_state.get("undo_stack"): _do_undo()
+        else: st.toast("沒有可還原的步驟")
+    if st.button("⟳", key="m_redo"):
+        if st.session_state.get("redo_stack"): _do_redo()
+        else: st.toast("沒有可重做的步驟")
     st.download_button(f"⬇ 匯出 {out_name}.pro6", export_bytes, out_name+".pro6",
                        "application/xml", use_container_width=True, key="dl_mobile")
 
