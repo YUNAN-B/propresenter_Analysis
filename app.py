@@ -101,7 +101,6 @@ from typing import Callable, Optional
 from urllib.parse import unquote
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 try:
     import pro7                       # Pro7(.pro) → Pro6(.pro6) 轉換（同目錄）
@@ -1997,6 +1996,13 @@ ProPresenter 7 的 **.pro** 上傳後會自動轉成 .pro6。
 - 頁面卡住或行為怪怪的：重新整理，再重傳一次原檔即可，不會弄壞你的原始檔。
 """
 
+def _inject_script(html: str):
+    """把一段只含 <script> 的 HTML 注入頁面：st.iframe 以 srcdoc 建同源 iframe，
+    腳本經 window.parent 操作外層頁面（改 <head>、掛事件監聽…）。
+    取代已公告棄用的 components.v1.html（同一種 iframe 元件，行為相同）。
+    st.iframe 的高度最少 1px；實際由下方 CSS 把這些 iframe 壓成 0 高、不佔版面。"""
+    st.iframe(html, height=1)
+
 st.set_page_config(
     page_title="ProParse · 投影片解析",
     page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "hard-hat.png"),
@@ -2004,10 +2010,10 @@ st.set_page_config(
     menu_items={"About": _ABOUT_TEXT},
 )
 
-# SEO：Streamlit 無法直接改 <head>，由 components iframe（同源）把 meta
+# SEO：Streamlit 無法直接改 <head>，由注入的 iframe（同源）把 meta
 # description / Open Graph 塞進父頁 head——Google 轉譯 JS 後讀得到，
 # 分享到社群也有標題與描述。旗標防 rerun 重複插入。
-components.html("""<script>
+_inject_script("""<script>
 (function(){
   const P=window.parent;
   if(P.__pp_meta__)return; P.__pp_meta__=true;
@@ -2023,14 +2029,16 @@ components.html("""<script>
   add({property:"og:description",content:DESC});
   add({property:"og:type",content:"website"});
 })();
-</script>""", height=0)
+</script>""")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;700&display=swap');
 html,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 .stCodeBlock,code,pre{font-family:'IBM Plex Mono',monospace!important;font-size:0.78rem!important;}
-.stTabs [data-baseweb="tab"]{font-weight:700;font-size:0.9rem;padding:0.5rem 1.5rem;}
+/* 分頁標籤：用 role 選（舊版 Streamlit 是 baseweb、1.6x 起改 react-aria，data-baseweb 沒了） */
+.stTabs [role="tab"]{font-weight:700;font-size:0.9rem;padding:0.5rem 1.5rem;}
+.stTabs [role="tab"] p{font-weight:700;font-size:0.9rem;}
 /* 撰寫頁 slide 標頭：緊湊化 + 熱鍵正方形/大寫 */
 /* 熱鍵：正方形、不被橫向容器拉伸 */
 [class*="st-key-hk_"]{width:2.6rem!important;flex:0 0 auto!important;}
@@ -2060,6 +2068,10 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
 [class*="st-key-sidebar_export"]{position:sticky;bottom:0;z-index:5;
   padding:.5rem 0 .25rem;border-top:1px solid rgba(128,128,128,.25);}
 
+/* 本工具的 iframe 全是 _inject_script 注入的純腳本，沒有要顯示的內容：一律壓成 0 高
+   （st.iframe 最少要 1px；深色模式下那 1px 會是一條白線）。 */
+[data-testid="stIFrame"]{height:0!important;min-height:0!important;display:block;}
+
 /* 手機專用操作列（還原／重做／匯出）：桌機隱藏（桌機用側欄那組即可）。
    外層 stLayoutWrapper 改 display:contents，隱藏/固定定位時都不留一格空隙。 */
 [data-testid="stLayoutWrapper"]:has(>[class*="st-key-mobile_bar"]){display:contents;}
@@ -2075,7 +2087,7 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   /* 有底部操作列時，內容底部多留空間，最後一個輸入框才不會被擋住 */
   [data-testid="stMainBlockContainer"]:has([class*="st-key-mobile_bar"]){
     padding-bottom:6rem!important;}
-  /* 只放 <script>/<style> 的零高度元素不佔版面間距（components.html 在本工具全是 height=0 的腳本）
+  /* 只放 <script>/<style> 的零高度元素不佔版面間距（本工具的 iframe 全是純腳本）
      ——否則標題上方平白多出好幾格空白 */
   [data-testid="stElementContainer"]:has(>[data-testid="stIFrame"]),
   [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"]>style:only-child){
@@ -2083,13 +2095,15 @@ div[data-baseweb="modal"] div[role="dialog"]:not([data-testid="stDialog"]){
   h1{font-size:1.4rem!important;padding:.25rem 0 .5rem!important;}
 
   /* 分頁列固定在頂列下方：長頁面（撰寫／模板）捲到一半也能直接切分頁。
-     sticky 要掛在 tab-list 的外層（tab-list 自己的父層只有它一個孩子，黏不住）。 */
-  .stTabs div:has(>[data-baseweb="tab-list"]){position:sticky;top:3.75rem;z-index:40;
+     兩種 DOM：舊版 tablist 外面多包一層只裝它的 div（sticky 要掛那層，掛 tablist 自己黏不住）；
+     1.6x 起 tablist 與各分頁內容是兄弟，直接掛 tablist。用 :only-child 區分。 */
+  .stTabs div:has(>[role="tablist"]:only-child),
+  .stTabs [role="tablist"]:not(:only-child){position:sticky;top:3.75rem;z-index:40;
     background:var(--pp-bg,#fff);margin:0 -.7rem;padding:0 .7rem;
     box-shadow:0 1px 0 rgba(128,128,128,.25);}
   /* 五個分頁平均分配寬度、加大點擊高度；320px 的小螢幕也排得下（排不下時可橫向捲動） */
-  .stTabs [data-baseweb="tab-list"]{gap:0!important;overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .stTabs [data-baseweb="tab"]{flex:1 0 auto;justify-content:center;min-height:2.75rem;
+  .stTabs [role="tablist"]{gap:0!important;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .stTabs [role="tab"]{flex:1 0 auto;justify-content:center;min-height:2.75rem;
     padding:.4rem .6rem!important;font-size:.9rem!important;}
 
   /* 底部固定操作列：⟲ ⟳ ＋ 匯出，拇指就按得到 */
@@ -2160,12 +2174,12 @@ st.markdown(f"<style>[class*='st-key-sidebar_export']{{background:"
             unsafe_allow_html=True)
 
 # ── 整頁拖放上傳 ────────────────────────────────────────────────
-# st.file_uploader 只吃拖進它自己框內的檔案；這裡經 components 的 iframe（同源，
+# st.file_uploader 只吃拖進它自己框內的檔案；這裡經注入的 iframe（同源，
 # 可碰 window.parent）在父頁面掛整頁 drag/drop：拖入時顯示遮罩，放開時依副檔名
 # 找第一個 accept 相符的 uploader（.pro6/.xml→主上傳器、.txt→創造分頁），把檔案
 # 塞進其 <input> 並發 change 事件讓 Streamlit 接手。rerun 會重建 iframe，故用
 # __pp_dnd__ 旗標確保監聽器只掛一次（遮罩掛在 body 上，不受 Streamlit 重繪影響）。
-components.html("""<script>
+_inject_script("""<script>
 (function(){
   const P=window.parent;
   if(P.__pp_dnd__)return; P.__pp_dnd__=true;
@@ -2316,7 +2330,7 @@ components.html("""<script>
   const app=doc.querySelector('[data-testid="stApp"]');
   if(app)new P.MutationObserver(later).observe(app,{attributes:true,attributeFilter:['class','style']});
 })();
-</script>""", height=0)
+</script>""")
 
 def _push_undo():
     """變更前把目前狀態存入 undo 堆疊（上限 50 步）。
@@ -2773,7 +2787,7 @@ def _transcode_tab():
     # 🥚 彩蛋：67→txt 的 ？ 說明泡泡持續停留 5 秒後，最後一排多出 67676…。
     # 認泡泡靠說明文字的首行（只有 67→txt 有）；移開游標泡泡關閉即取消計時。
     # 旗標掛父視窗：rerun 重建 iframe 也只掛一次 observer。
-    components.html("""<script>
+    _inject_script("""<script>
     (function(){
       const P=window.parent;
       if(P.__pp_67egg__)return; P.__pp_67egg__=true;
@@ -2803,7 +2817,7 @@ def _transcode_tab():
       };
       new P.MutationObserver(check).observe(doc.body,{childList:true,subtree:true});
     })();
-    </script>""", height=0)
+    </script>""")
 
 # 創造分頁按「產生」後，延到此處（任何 widget 實例化之前）才載入新檔
 if "_pending_new" in st.session_state:

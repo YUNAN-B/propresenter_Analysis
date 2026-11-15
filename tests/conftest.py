@@ -29,7 +29,7 @@ def _load_app():
               "divider", "button", "download_button", "tabs", "expander", "columns",
               "text_area", "success", "error", "rerun", "code", "checkbox", "radio",
               "warning", "text_input", "container", "toggle", "toast", "balloons", "snow",
-              "subheader", "number_input", "selectbox"]:
+              "subheader", "number_input", "selectbox", "iframe"]:
         setattr(st, n, _noop)
 
     class _Ctx:                       # st.columns/container 的最小替身：可 with、可 .method()
