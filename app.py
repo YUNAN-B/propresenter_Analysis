@@ -2248,6 +2248,56 @@ components.html("""<script>
     {childList:true,subtree:true,attributes:true,attributeFilter:['accept']});
 })();
 
+// ── 匯出防搶跑 ────────────────────────────────────────────────
+// 「字還在輸入框裡就直接點匯出」：那一下同時觸發 (1) 輸入框失焦→存檔→重跑，
+// (2) 匯出鈕立刻下載「目前掛著的」檔——也就是存檔前的舊內容，最後一筆修改會漏掉。
+// 這裡在父頁攔下這種點擊（剛離開輸入框 0.6 秒內、或 script 還在跑），等重跑結束、
+// 匯出鈕換上新內容後再替使用者補按一次。其餘情況完全不插手。
+(function(){
+  const P=window.parent;
+  if(P.__pp_exp__)return; P.__pp_exp__=true;
+  const doc=P.document;
+  const SELS=['[class*="st-key-dl_mobile"] button',
+              '[class*="st-key-sidebar_export"] [data-testid="stDownloadButton"] button'];
+  const busy=()=>{
+    const a=doc.querySelector('[data-testid="stApp"]');
+    const s=a&&a.getAttribute('data-test-script-state');
+    return !!s&&s!=='notRunning';
+  };
+  let lastBlur=0, waiting=false;
+  doc.addEventListener('focusout',e=>{
+    const t=e.target;
+    if(t&&t.matches&&t.matches('textarea,input'))lastBlur=P.Date.now();
+  },true);
+  doc.addEventListener('click',e=>{
+    const t=e.target;
+    if(!t||!t.closest)return;
+    const sel=SELS.find(s=>t.closest(s));
+    if(!sel)return;
+    const btn=t.closest(sel);
+    if(btn.__ppPass){btn.__ppPass=false;return;}          // 我們補按的那一下：放行
+    if(!waiting&&!busy()&&P.Date.now()-lastBlur>600)return; // 沒有待存的修改：照常下載
+    e.preventDefault(); e.stopImmediatePropagation();
+    if(waiting)return;                                     // 已在等：連點不重複排隊
+    waiting=true;
+    const t0=P.Date.now(); let idleSince=0;
+    const tick=()=>{
+      const now=P.Date.now();
+      // 前 0.8 秒一律當成還在忙：存檔的 rerun 要經一趟網路來回才會顯示成 running
+      if(busy()||now-t0<800)idleSince=0;
+      else if(!idleSince)idleSince=now;
+      if((idleSince&&now-idleSince>=250)||now-t0>15000){  // 穩定閒置（或等太久）→ 補按
+        waiting=false;
+        const b=doc.querySelector(sel);
+        if(b&&!b.disabled){b.__ppPass=true; b.click();}
+        return;
+      }
+      P.setTimeout(tick,60);
+    };
+    tick();
+  },true);
+})();
+
 // ── --pp-bg 跟著實際主題走 ─────────────────────────────────────
 // 手機的固定分頁列／底部操作列要不透明底色。Python 端的 st.context.theme 只在
 // rerun 時更新（系統明暗切換不會觸發 rerun），所以這裡直接讀 stApp 算出來的底色
@@ -2691,12 +2741,17 @@ _TC_MODES={
 def _transcode_tab():
     """轉檔分頁：三種模式各一個常駐上傳框（標題＝模式名、配識別色），
     不用先選模式——檔案丟進哪個框就做哪種轉換。「選擇檔案」旁的 ？ 滑過看詳細說明。"""
-    # 邊框在 stVerticalBlockBorderWrapper（key class 的外層）上，須用 :has 選到；
-    # 背景另掛在 key 元素本身當 fallback（舊瀏覽器不支援 :has 時仍有底色）。
+    # 識別色（底色＋邊框）兩種 DOM 都要顧：
+    # ・舊版 Streamlit：邊框在外層 stVerticalBlockBorderWrapper，用 :has 選到它上色，
+    #   內層 key 元素清成透明/無框，免得疊兩層。
+    # ・新版（1.5x 起沒有 BorderWrapper）：邊框就在 key 元素本身，直接上色。
     st.markdown("<style>"+"".join(
         f"[data-testid='stVerticalBlockBorderWrapper']:has([class*='st-key-tc_panel_{_m}'])"
         f"{{background:{_c}12;border:1.5px solid {_c}66;border-radius:10px;}}"
-        f"[class*='st-key-tc_panel_{_m}']{{background:transparent;}}"
+        f"[class*='st-key-tc_panel_{_m}']{{background:{_c}12;"
+        f"border:1.5px solid {_c}66!important;border-radius:10px;}}"
+        f"[data-testid='stVerticalBlockBorderWrapper'] [class*='st-key-tc_panel_{_m}']"
+        f"{{background:transparent;border:none!important;}}"
         for _m,(_l,_t,_x,_c,_p) in _TC_MODES.items())+"</style>",
         unsafe_allow_html=True)
     for mode,(lbl,types,to_txt,color,tip) in _TC_MODES.items():
@@ -2839,8 +2894,8 @@ with st.sidebar:
 
 # 手機專用：固定在畫面底部的操作列（⟲ ⟳ ＋ 匯出）。桌機用 CSS 隱藏；
 # 手機側欄預設收合，還原/匯出若只在側欄，每次都得先開側欄、長頁面還要捲回頂端。
-# 兩顆箭頭不設 disabled：撰寫頁是 fragment，改完字只重跑該區塊、這一列不會重繪，
-# 用 disabled 會卡在「改了字卻還是灰的」；改成永遠可按，沒有步驟時飄提示。
+# 兩顆箭頭不設 disabled、永遠可按（沒有步驟時飄提示）：這一列常駐畫面，
+# 不必依賴「重繪後才亮起來」，剛存完字馬上按也一定有反應。
 with st.container(key="mobile_bar"):
     if st.button("⟲", key="m_undo"):
         if st.session_state.get("undo_stack"): _do_undo()
@@ -3065,11 +3120,14 @@ with tab_tpl:
 
 
 # ─── TAB 4: 撰寫（逐段編輯明文，失焦自動儲存）─────────────────
-# 包成 fragment：編輯/儲存單一段落時只重跑此區塊，不重新解析整份檔案、不動其他分頁。
+# 包成 fragment：切換「詳細編輯」、或失焦但內容沒變時，只重跑此區塊。
+# 但只要真的存了東西（文字／圖層名稱／熱鍵），就必須整頁重跑：匯出鈕（側欄與手機
+# 底部操作列）的下載內容是在整頁執行時算好掛上去的，只重跑 fragment 不會更新——
+# 會變成「撰寫頁改了字，按匯出卻拿到改字前的舊檔」。還原鈕、側欄摘要同理。
 @st.fragment
 def _write_tab():
-    # fragment 內自行重讀 session_state 的最新內容並重解析，
-    # 確保存檔後本區塊（含下方數字串）即時更新，而其餘分頁與側欄維持不動。
+    if st.session_state.pop("_w_full", False):       # 上一輪 callback 存了東西 → 整頁重跑
+        st.rerun()
     xml=st.session_state["xml_content"]
     _dm, groups=_parse_xml(xml)
 
@@ -3100,6 +3158,7 @@ def _write_tab():
         st.session_state["xml_content"]=nb
         st.session_state.pop(key, None)
         st.session_state["history"].append(f"文字G{gi}S{si}L{li}")
+        st.session_state["_w_full"]=True             # 匯出/還原/側欄要跟著更新
 
     def _save_layer_name(gi, si, li, key):
         """圖層命名失焦自動儲存：把 displayName 寫回 XML 屬性。"""
@@ -3112,6 +3171,7 @@ def _write_tab():
         st.session_state["xml_content"]=nb
         st.session_state.pop(key, None)
         st.session_state["history"].append(f"命名G{gi}S{si}L{li}")
+        st.session_state["_w_full"]=True
 
     def _set_group(num, name, color):
         """按了段落類型按鈕：從這張往後（同組連續範圍）整段套用名稱+顏色，整頁刷新。
@@ -3137,6 +3197,7 @@ def _write_tab():
         if owner:
             st.session_state["_hk_msg"]=f"熱鍵「{key}」原本在 Slide {owner}，已覆蓋改設到 Slide {num}"
         st.session_state["history"].append(f"熱鍵S{num}")
+        st.session_state["_w_full"]=True
         for k in [k for k in st.session_state if k.startswith(("hk_","ln_"))]:
             st.session_state.pop(k, None)
 
